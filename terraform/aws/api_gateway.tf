@@ -153,15 +153,15 @@ resource "aws_api_gateway_stage" "prod" {
   xray_tracing_enabled = true
 }
 
-# Method Settings: Throttling for mcp/POST
+# Method Settings: Throttling for all methods in stage (AWS format: */* not /*/*)
 resource "aws_api_gateway_method_settings" "mcp_post" {
   rest_api_id = aws_api_gateway_rest_api.mcp_api.id
   stage_name  = aws_api_gateway_stage.prod.stage_name
-  method_path = "mcp/POST"
+  method_path = "*/*"
 
   settings {
-    throttling_burst_limit = 100
-    throttling_rate_limit  = 50
+    throttling_burst_limit = 10
+    throttling_rate_limit  = 5
   }
 }
 
