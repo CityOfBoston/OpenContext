@@ -1,21 +1,23 @@
 # Getting Started
 
-Get your OpenContext MCP server running in under 10 minutes.
+Get your OpenContext server running in under 10 minutes.
+
+OpenContext uses the Model Context Protocol (MCP), which connects AI assistants to external data. Your server exposes tools that AI assistants can call to search and query your open data.
 
 ## Prerequisites
 
 - Python 3.11+
+- Node.js and npm (required for connecting Claude Desktop via Streamable HTTP)
 - Terraform >= 1.0 (for deployment)
 - AWS CLI configured (for deployment)
-- Node.js and npm (for Streamable HTTP transport—no binary needed)
 
 ## Quick Path: Local Testing
 
-Test the MCP server locally before deploying.
+Test the server locally before deploying.
 
 ### 1. Configure Your Plugin
 
-Create `config.yaml` from the template and enable **ONE** plugin:
+Create `config.yaml` from the template and enable **exactly one** plugin:
 
 ```bash
 cp config-example.yaml config.yaml
@@ -32,6 +34,8 @@ plugins:
     city_name: "Boston"
     timeout: 120
 ```
+
+Each deployment connects to one data source. To connect another source, deploy a separate server. See [Architecture](ARCHITECTURE.md) for details.
 
 ### 2. Start the Local Server
 
@@ -67,6 +71,8 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 
 **Option B: Go client binary**
 
+Build the client: `cd client && make build`. Then:
+
 ```json
 {
   "mcpServers": {
@@ -88,7 +94,7 @@ curl -X POST http://localhost:8000/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'
 ```
 
-Or run the full test: `./scripts/test_streamable_http.sh`
+You can also test with Claude by asking it to search your data, or use [Testing](TESTING.md) for more options (MCP Inspector, full test script).
 
 ---
 
@@ -99,7 +105,7 @@ Or run the full test: `./scripts/test_streamable_http.sh`
 1. Fork the [OpenContext repository](https://github.com/thealphacubicle/OpenContext)
 2. Clone your fork
 3. Create config: `cp config-example.yaml config.yaml`
-4. Edit `config.yaml` with **ONE** plugin enabled
+4. Edit `config.yaml` with **exactly one** plugin enabled
 
 ### 2. Deploy to AWS
 
@@ -108,8 +114,10 @@ Or run the full test: `./scripts/test_streamable_http.sh`
 ```
 
 The script validates config, packages code, and deploys to AWS Lambda. You'll receive:
-- **Lambda Function URL** – for local/testing (no auth)
+- **Lambda Function URL** – for testing (no auth)
 - **API Gateway URL** – for production (API key, rate limiting)
+
+AWS creates: Lambda function, Function URL, API Gateway, IAM role, CloudWatch Log Group. Cost is roughly $1/month for 100K requests. See [Deployment](DEPLOYMENT.md) for details.
 
 ### 3. Connect Claude Desktop (Production)
 
@@ -158,24 +166,9 @@ Use the full URL from `terraform output` (it already includes `/mcp`):
 }
 ```
 
-### 4. Client Binary (Alternative)
+### 4. Updating
 
-Download from [GitHub Releases](https://github.com/thealphacubicle/OpenContext/releases) or build:
-
-```bash
-cd client && make build
-```
-
-```json
-{
-  "mcpServers": {
-    "Boston OpenData": {
-      "command": "/path/to/opencontext-client",
-      "args": ["https://your-lambda-url.lambda-url.us-east-1.on.aws"]
-    }
-  }
-}
-```
+To update config or code: edit `config.yaml` or your code, then run `./scripts/deploy.sh` again.
 
 ---
 
@@ -184,15 +177,21 @@ cd client && make build
 | Issue | Solution |
 |-------|----------|
 | `ModuleNotFoundError: aiohttp` | `pip install aiohttp` |
-| "Multiple Plugins Enabled" | Enable only ONE plugin in `config.yaml` |
+| "Multiple Plugins Enabled" | Enable only one plugin in `config.yaml` |
 | Claude can't connect | Verify URL includes `/mcp`, restart Claude Desktop |
 | Lambda 500 error | Check CloudWatch logs, validate config |
+| Plugin init fails | Check API URLs, keys, and network connectivity |
 
 ---
 
 ## Next Steps
 
-- [Deployment Guide](DEPLOYMENT.md) – AWS details, monitoring, cost
-- [Plugins Guide](PLUGINS.md) – CKAN reference and custom plugins
-- [Testing Guide](TESTING.md) – Unit tests, curl examples
-- [Architecture](ARCHITECTURE.md) – System design
+- [Architecture](ARCHITECTURE.md) – System design, built-in plugins, custom plugins
+- [Deployment](DEPLOYMENT.md) – AWS details, monitoring, cost
+- [Testing](TESTING.md) – Local testing (Terminal, Claude, MCP Inspector)
+
+---
+
+## Support
+
+[GitHub Issues](https://github.com/thealphacubicle/OpenContext/issues)
