@@ -36,7 +36,7 @@ Yes, but they must be resolved before deployment. Terraform will set the final c
 
 ### What if I need to change configuration after deployment?
 
-Edit `config.yaml` and run `./deploy.sh` again. Terraform will update the Lambda environment variable.
+Edit `config.yaml` and run `./scripts/deploy.sh` again. Terraform will update the Lambda environment variable.
 
 ## Plugins
 
@@ -75,7 +75,7 @@ The current implementation is AWS-specific. Contributions for other providers ar
 
 ### How do I update an existing deployment?
 
-Run `./deploy.sh` again. Terraform will update the Lambda function.
+Run `./scripts/deploy.sh` again. Terraform will update the Lambda function.
 
 ## Usage
 

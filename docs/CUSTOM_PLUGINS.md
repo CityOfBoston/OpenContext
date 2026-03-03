@@ -27,7 +27,7 @@ Custom plugins allow you to integrate OpenContext with your own APIs, databases,
        api_key: "${MY_API_KEY}"
    ```
 
-4. Deploy: `./deploy.sh`
+4. Deploy: `./scripts/deploy.sh`
 
 ## Plugin Structure
 
@@ -143,11 +143,11 @@ class MyDataPlugin(DataPlugin):
     async def search_datasets(self, query: str, limit: int = 20):
         # Implement dataset search
         pass
-    
+
     async def get_dataset(self, dataset_id: str):
         # Implement dataset retrieval
         pass
-    
+
     async def query_data(self, resource_id: str, filters: Optional[Dict] = None, limit: int = 100):
         # Implement data querying
         pass
@@ -218,22 +218,22 @@ class MyAPIPlugin(MCPPlugin):
     plugin_name = "my_api"
     plugin_type = PluginType.CUSTOM_API
     plugin_version = "1.0.0"
-    
+
     def __init__(self, config: Dict[str, Any]) -> None:
         super().__init__(config)
         self.api_url = config["api_url"]
         self.client = None
-    
+
     async def initialize(self) -> bool:
         self.client = httpx.AsyncClient(base_url=self.api_url)
         self._initialized = True
         return True
-    
+
     async def shutdown(self) -> None:
         if self.client:
             await self.client.aclose()
         self._initialized = False
-    
+
     def get_tools(self) -> List[ToolDefinition]:
         return [
             ToolDefinition(
@@ -248,7 +248,7 @@ class MyAPIPlugin(MCPPlugin):
                 },
             ),
         ]
-    
+
     async def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> ToolResult:
         if tool_name == "get_item":
             item_id = arguments["item_id"]
@@ -259,7 +259,7 @@ class MyAPIPlugin(MCPPlugin):
                 success=True,
             )
         return ToolResult(content=[], success=False, error_message="Unknown tool")
-    
+
     async def health_check(self) -> bool:
         try:
             response = await self.client.get("/health")
@@ -280,10 +280,10 @@ from custom_plugins.my_plugin.plugin import MyAPIPlugin
 async def test():
     plugin = MyAPIPlugin({"api_url": "https://api.example.com"})
     await plugin.initialize()
-    
+
     tools = plugin.get_tools()
     print(f"Tools: {[t.name for t in tools]}")
-    
+
     result = await plugin.execute_tool("get_item", {"item_id": "123"})
     print(f"Result: {result.success}")
 
@@ -326,4 +326,3 @@ def __init__(self, config: Dict[str, Any]) -> None:
 - [FAQ](FAQ.md)
 - [GitHub Issues](https://github.com/thealphacubicle/OpenContext/issues)
 - [Architecture Guide](ARCHITECTURE.md)
-
