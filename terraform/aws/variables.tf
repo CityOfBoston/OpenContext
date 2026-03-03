@@ -13,7 +13,7 @@ variable "aws_region" {
 variable "config_file" {
   description = "Path to config.yaml file"
   type        = string
-  default     = "../config.yaml"
+  default = "../../config.yaml"
 }
 
 variable "lambda_memory" {
@@ -28,3 +28,26 @@ variable "lambda_timeout" {
   default     = 120
 }
 
+variable "api_quota_limit" {
+  description = "API Gateway daily request quota"
+  type        = number
+  default     = 1000
+}
+
+variable "api_rate_limit" {
+  description = "API Gateway requests per second rate limit"
+  type        = number
+  default     = 5
+}
+
+variable "api_burst_limit" {
+  description = "API Gateway burst limit"
+  type        = number
+  default     = 10
+}
+
+variable "stage_name" {
+  description = "API Gateway stage name (e.g. prod, dev, staging)"
+  type        = string
+  default     = "staging"
+}

@@ -1,244 +1,123 @@
 # Deployment Guide
 
-Detailed guide for deploying OpenContext to AWS Lambda.
+Deploy OpenContext to AWS Lambda. See [Getting Started](GETTING_STARTED.md) for the quick path.
 
 ## Prerequisites
 
-- AWS account with appropriate permissions
-- AWS CLI configured
-- Terraform >= 1.0 installed
-- Python 3.11+ installed
+- AWS account, AWS CLI configured
+- Terraform >= 1.0
+- Python 3.11+
 
-## AWS Permissions Required
+## AWS Permissions
 
-Your AWS credentials need permissions for:
 - Lambda (create, update functions)
-- IAM (create roles and policies)
-- CloudWatch Logs (create log groups)
-- API Gateway / Lambda Function URLs (create URLs)
+- IAM (roles, policies)
+- CloudWatch Logs
+- API Gateway / Lambda Function URLs
 
-## Deployment Steps
-
-### 1. Configure AWS Credentials
+## Deployment
 
 ```bash
+# Configure AWS
 aws configure
+
+# Create config from template (if needed)
+cp config-example.yaml config.yaml
+# Edit config.yaml - enable exactly ONE plugin
+
+# Deploy (validates config, packages, deploys)
+./scripts/deploy.sh
 ```
 
-Or set environment variables:
-```bash
-export AWS_ACCESS_KEY_ID=your_key
-export AWS_SECRET_ACCESS_KEY=your_secret
-export AWS_DEFAULT_REGION=us-east-1
-```
+### Manual Terraform
 
-### 2. Configure Your Plugin
-
-Edit `config.yaml`:
-
-```yaml
-server_name: "MyMCP"
-plugins:
-  ckan:
-    enabled: true
-    base_url: "https://data.yourcity.gov"
-    # ... other config
-aws:
-  region: "us-east-1"
-  lambda_memory: 512
-  lambda_timeout: 120
-```
-
-**Important:** Enable exactly ONE plugin.
-
-### 3. Run Deployment Script
+First-time: bootstrap the S3 backend (run once). See [terraform/bootstrap/README.md](../terraform/bootstrap/README.md):
 
 ```bash
-./deploy.sh
+cd terraform/bootstrap
+terraform init && terraform apply
 ```
 
-The script will:
-1. Validate configuration (ensures ONE plugin enabled)
-2. Package Lambda code
-3. Initialize Terraform (if needed)
-4. Deploy to AWS Lambda
-5. Output Lambda URL
-
-### 4. Verify Deployment
-
-Check AWS Console:
-- Lambda function exists
-- Function URL is enabled
-- CloudWatch Log Group created
-
-Test Lambda URL:
-```bash
-curl -X POST https://your-lambda-url.lambda-url.us-east-1.on.aws \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'
-```
-
-## Manual Terraform Deployment
-
-If you prefer to use Terraform directly:
+Then deploy:
 
 ```bash
-cd terraform
+cd terraform/aws
 terraform init
-terraform plan \
-  -var="lambda_name=my-mcp-server" \
-  -var="aws_region=us-east-1" \
-  -var="config_file=../config.yaml"
+terraform plan -var="config_file=config.yaml"
 terraform apply
 ```
 
-## Updating Deployment
+The deploy script copies `config.yaml` into `terraform/aws/` before running Terraform. For manual runs, ensure `config.yaml` exists in the project root or pass the correct path.
 
-To update an existing deployment:
+## Endpoints
 
-1. Make changes to code or config
-2. Run `./deploy.sh` again
-3. Terraform will update the Lambda function
+| Endpoint | Use Case | Auth |
+|----------|----------|------|
+| **API Gateway** | Production | Rate limiting, daily quota |
+| **Lambda Function URL** | Testing | None |
 
-## Environment Variables
+### Get URLs
 
-Configuration is passed to Lambda via `OPENCONTEXT_CONFIG` environment variable (JSON).
-
-To update config:
-1. Edit `config.yaml`
-2. Run `./deploy.sh` (Terraform updates environment variable)
-
-## Lambda Configuration
-
-### Memory
-
-Default: 512 MB
-Range: 128 MB - 10,240 MB
-
-Adjust in `config.yaml`:
-```yaml
-aws:
-  lambda_memory: 1024  # Increase for heavy workloads
+```bash
+cd terraform/aws
+terraform output -raw api_gateway_url   # Production (includes /mcp)
+terraform output -raw lambda_url      # Testing
 ```
 
-### Timeout
+### API Gateway
 
-Default: 120 seconds
-Range: 1 - 900 seconds
+- **Rate limit:** 100 burst, 50 sustained req/s (configurable via Terraform variables)
+- **Daily quota:** 1000 requests/day (configurable via `api_quota_limit`)
+- **Stage name:** Default is `staging`; URL format: `https://...execute-api.region.amazonaws.com/staging/mcp`
+- **429** when exceeded
+- Use for production; Lambda URL has no auth
 
-Adjust in `config.yaml`:
+## Configuration
+
+Config is passed via `OPENCONTEXT_CONFIG` env var. Create `config.yaml` from `config-example.yaml`, edit it, and run `./scripts/deploy.sh` to update.
+
+### Lambda Settings (in config.yaml)
+
 ```yaml
 aws:
-  lambda_timeout: 300  # Increase for slow APIs
+  region: "us-east-1"
+  lambda_name: "my-mcp-server"   # Optional; defaults from server_name
+  lambda_memory: 512             # 128–10240 MB
+  lambda_timeout: 120            # 1–900 seconds
 ```
-
-### Runtime
-
-Fixed: Python 3.11
-
-## Function URL
-
-Lambda Function URL is created automatically with:
-- Authorization: NONE (public access)
-- CORS: Enabled for all origins
-- Methods: POST, OPTIONS
 
 ## Monitoring
 
-### CloudWatch Logs
+- **CloudWatch Logs:** `/aws/lambda/<function-name>`, 14-day retention
+- **Tail logs:** `aws logs tail /aws/lambda/my-mcp-server --follow`
 
-Logs are automatically sent to CloudWatch:
-- Log Group: `/aws/lambda/<function-name>`
-- Retention: 14 days
-- Format: JSON structured logs
+## Updating & Cleanup
 
-### View Logs
+**Update:** Change code/config, run `./scripts/deploy.sh` again.
 
+**Destroy:**
 ```bash
-aws logs tail /aws/lambda/my-mcp-server --follow
+cd terraform/aws
+terraform destroy -var="config_file=config.yaml"
 ```
 
-Or in AWS Console:
-1. Go to Lambda function
-2. Click "Monitor" tab
-3. Click "View CloudWatch logs"
+## Cost (us-east-1)
+
+- Lambda: ~$0.20/1M requests, ~$0.0000166667/GB-second
+- Function URL: Free
+- Example: 100K req/month, 512 MB, 1s avg ≈ **$1/month**
 
 ## Troubleshooting
 
-### Deployment Fails: "Multiple Plugins Enabled"
+| Issue | Solution |
+|-------|----------|
+| Multiple plugins | Enable only ONE in `config.yaml` |
+| Lambda timeout | Increase `lambda_timeout` |
+| 500 error | Check CloudWatch logs, validate config |
+| High cost | Reduce `lambda_memory`, review usage |
 
-**Solution:** Enable only ONE plugin in `config.yaml`.
+## Security
 
-### Lambda Times Out
-
-**Solutions:**
-- Increase `lambda_timeout` in config
-- Check if data source API is slow
-- Review CloudWatch logs for errors
-
-### Function URL Returns 500
-
-**Check:**
-1. CloudWatch logs for errors
-2. Configuration is valid JSON
-3. Plugin initialization succeeded
-
-### High Lambda Costs
-
-**Solutions:**
-- Reduce `lambda_memory` if not needed
-- Enable Lambda provisioned concurrency (if needed)
-- Review CloudWatch metrics for usage patterns
-
-## Cleanup
-
-To delete deployment:
-
-```bash
-cd terraform
-terraform destroy
-```
-
-This removes:
-- Lambda function
-- Function URL
-- IAM role
-- CloudWatch Log Group
-
-## Cost Estimation
-
-Typical costs (us-east-1):
-- Lambda: $0.20 per 1M requests
-- Lambda: $0.0000166667 per GB-second
-- Function URL: Free
-- CloudWatch Logs: $0.50 per GB ingested
-
-Example: 100K requests/month, 512 MB, 1s average:
-- Requests: ~$0.02
-- Compute: ~$0.85
-- Logs: ~$0.10
-- **Total: ~$1/month**
-
-## Security Considerations
-
-- Function URLs are public (no authentication)
-- Use API keys in plugin config for data source authentication
-- Store secrets in environment variables (not in code)
-- Review CloudWatch logs regularly
-- Consider adding authentication layer if needed
-
-## Best Practices
-
-1. **Test locally** before deploying
-2. **Monitor CloudWatch** logs after deployment
-3. **Set appropriate timeouts** based on API response times
-4. **Use environment variables** for secrets
-5. **Version control** your config.yaml
-6. **Document** your deployment process
-
-## Next Steps
-
-- [Quick Start Guide](QUICKSTART.md)
-- [Architecture Guide](ARCHITECTURE.md)
-- [Custom Plugins Guide](CUSTOM_PLUGINS.md)
-
+- Use API Gateway for production (rate limiting, quota)
+- Lambda URL is public—testing only
+- Store secrets in env vars, not code

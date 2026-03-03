@@ -1,5 +1,5 @@
 output "lambda_url" {
-  description = "Lambda Function URL for MCP server"
+  description = "Lambda Function URL for MCP server (for local testing)"
   value       = aws_lambda_function_url.mcp_server_url.function_url
 }
 
@@ -18,3 +18,7 @@ output "cloudwatch_log_group" {
   value       = aws_cloudwatch_log_group.lambda_logs.name
 }
 
+output "api_gateway_url" {
+  description = "API Gateway URL for MCP server (production endpoint with authentication)"
+  value       = "${aws_api_gateway_stage.prod.invoke_url}/mcp"
+}

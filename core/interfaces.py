@@ -189,4 +189,3 @@ class DataPlugin(MCPPlugin):
             List of data records
         """
         pass
-

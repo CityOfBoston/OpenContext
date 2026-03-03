@@ -57,6 +57,8 @@ Add to your Claude Desktop configuration file:
 }
 ```
 
+**Note:** The client automatically appends `/mcp` to the Lambda URL. You can provide the base Lambda URL (without `/mcp`) or the full URL with `/mcp` - both work.
+
 ### Command Line
 
 ```bash
@@ -75,6 +77,8 @@ export OPENCONTEXT_LAMBDA_URL=https://your-lambda-url.lambda-url.us-east-1.on.aw
 
 ## How It Works
 
-The client reads MCP JSON-RPC messages from stdin and forwards them to the Lambda Function URL via HTTP POST. Responses are written to stdout in the same JSON-RPC format.
+The client reads MCP JSON-RPC messages from stdin and forwards them to the Lambda Function URL's `/mcp` endpoint via HTTP POST. Responses are written to stdout in the same JSON-RPC format.
 
-This allows Claude Desktop to communicate with OpenContext MCP servers running on AWS Lambda without requiring direct HTTP access.
+This allows Claude Desktop to communicate with OpenContext MCP servers running on AWS Lambda using the stdio transport protocol, bridging it to HTTP.
+
+**Note:** OpenContext also supports Streamable HTTP transport directly (no binary needed). See the main README for both connection options.

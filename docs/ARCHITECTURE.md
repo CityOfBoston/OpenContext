@@ -2,113 +2,135 @@
 
 ## Overview
 
-OpenContext is a plugin-based MCP framework where each fork deploys exactly **ONE MCP server** with **ONE plugin** enabled. This document explains the system design and rationale.
+OpenContext is a plugin-based framework. Each deployment runs **one** server with **one** plugin. This keeps deployments simple, independently scalable, and easy to maintain.
 
-## Core Principles
+## One Fork = One Server
 
-### One Fork = One MCP Server
+**Enforcement:**
+- `scripts/deploy.sh` validates config before deployment
+- `plugin_manager.py` fails if multiple plugins are enabled
 
-**Why this rule exists:**
+**Multiple servers:** Fork again per plugin, deploy each separately.
 
-1. **Simplicity** - Each deployment has a single, clear purpose
-2. **Independence** - Servers can be scaled, updated, and maintained independently
-3. **Clarity** - No ambiguity about what a server does
-4. **Isolation** - Failures in one server don't affect others
-
-**How it's enforced:**
-
-- **deploy.sh** - Validates config before deployment
-- **plugin_manager.py** - Crashes Lambda if multiple plugins enabled
-
-### Plugin-Based Architecture
-
-The framework consists of:
-
-- **Core Framework** (`core/`) - Universal, never modified by governments
-- **Built-in Plugins** (`plugins/`) - CKAN
-- **Custom Plugins** (`custom_plugins/`) - Government-specific plugins
-
-## System Components
-
-### Core Framework
+## Components
 
 ```
 core/
-├── interfaces.py       # MCPPlugin abstract base class
-├── plugin_manager.py   # Plugin discovery, loading, routing
-├── mcp_server.py      # MCP JSON-RPC protocol handler
-└── validators.py      # Configuration validation
+├── interfaces.py       # MCPPlugin, DataPlugin, ToolDefinition
+├── plugin_manager.py   # Discovery, loading, routing
+├── mcp_server.py       # MCP JSON-RPC handler
+├── validators.py       # Config validation
+└── logging_utils.py   # Structured logging
+
+server/
+├── adapters/
+│   └── aws_lambda.py   # Lambda handler entry point
+└── http_handler.py     # HTTP request handling
+
+plugins/                # Built-in (CKAN)
+├── ckan/
+│   ├── plugin.py
+│   ├── config_schema.py
+│   └── sql_validator.py
+
+custom_plugins/         # User plugins (auto-discovered)
+├── template/
+│   └── plugin_template.py
+
+examples/               # Example configs and plugins
+├── boston-opendata/
+└── custom-plugin/
+
+client/                 # Go stdio-to-HTTP client (optional)
+tests/                  # Unit tests
 ```
 
-### Plugin Manager
-
-The Plugin Manager:
-
-1. **Discovers** plugins in `plugins/` and `custom_plugins/`
-2. **Validates** exactly ONE plugin is enabled
-3. **Loads** the enabled plugin
-4. **Registers** tools with plugin name prefix (e.g., `ckan__search_datasets`)
-5. **Routes** tool calls to the correct plugin
-
-### MCP Server
-
-Handles MCP JSON-RPC protocol:
-
-- `initialize` - Server initialization
-- `tools/list` - List available tools
-- `tools/call` - Execute a tool
-- `ping` - Health check
-
-### Lambda Handler
-
-AWS Lambda entry point:
-
-- Loads configuration from environment variable
-- Initializes Plugin Manager
-- Handles HTTP requests from Function URL
-- Returns MCP JSON-RPC responses
-
-## Request Flow
-
-### Claude Desktop (stdio client)
+### Request Flow
 
 ```
-Claude Desktop
-    ↓ (stdio JSON-RPC)
-opencontext-client (stdio bridge)
-    ↓ (HTTP POST)
-Lambda Function URL
-    ↓
-Lambda Handler
-    ↓
-MCP Server
-    ↓
-Plugin Manager
-    ↓
-Plugin (e.g., CKAN)
-    ↓ (HTTP)
-CKAN API
+Claude Desktop / App
+    → stdio bridge (npx) or Go client
+Lambda / Local Server
+    → server.adapters.aws_lambda or local_server.py
+    → MCP Server (core/mcp_server.py)
+    → Plugin Manager
+    → Plugin (e.g., CKAN)
+    → External API
 ```
 
-### Direct HTTP (LaunchPad/Applications)
+## Plugins
 
+Each deployment enables **exactly one** plugin.
+
+### Built-in: CKAN
+
+For CKAN-based open data portals (e.g., data.boston.gov, data.gov, data.gov.uk).
+
+**Configuration:**
+
+```yaml
+plugins:
+  ckan:
+    enabled: true
+    base_url: "https://data.yourcity.gov"
+    portal_url: "https://data.yourcity.gov"
+    city_name: "Your City"
+    timeout: 120
+    api_key: "${CKAN_API_KEY}"  # Optional
 ```
-Application
-    ↓ (HTTP POST JSON-RPC)
-Lambda Function URL
-    ↓
-Lambda Handler
-    ↓
-MCP Server
-    ↓
-Plugin Manager
-    ↓
-Plugin
+
+**Tools:**
+
+| Tool | Description |
+|------|-------------|
+| `ckan__search_datasets(query, limit)` | Search for datasets |
+| `ckan__get_dataset(dataset_id)` | Get dataset metadata |
+| `ckan__query_data(resource_id, filters, limit)` | Query data from a resource |
+| `ckan__get_schema(resource_id)` | Get schema for a resource |
+| `ckan__execute_sql(sql)` | Execute PostgreSQL SELECT queries (advanced) |
+
+**SQL execution:** The `execute_sql` tool allows complex PostgreSQL queries (CTEs, window functions, joins). Only SELECT is allowed. INSERT, UPDATE, DELETE, DROP, and other destructive operations are blocked. Resource IDs must be valid UUIDs in double quotes: `FROM "uuid-here"`. See [CKAN API docs](https://docs.ckan.org/en/latest/api/) for details.
+
+### Custom Plugins
+
+Add your own plugins in `custom_plugins/`. They are auto-discovered.
+
+**Quick start:**
+
+```bash
+mkdir -p custom_plugins/my_plugin
+cp custom_plugins/template/plugin_template.py custom_plugins/my_plugin/plugin.py
 ```
+
+Edit the plugin, add config to `config.yaml` (create from `config-example.yaml` if needed), then `./scripts/deploy.sh`.
+
+**Structure:**
+- Inherit from `MCPPlugin` (or `DataPlugin` for data sources)
+- Set: `plugin_name`, `plugin_type`, `plugin_version`
+- Place in: `custom_plugins/your_plugin_name/plugin.py`
+- Tool names: no prefix—Plugin Manager adds it (e.g., `my_plugin__search`)
+
+**Required methods:**
+
+```python
+def __init__(self, config: Dict[str, Any]) -> None
+async def initialize() -> bool
+async def shutdown() -> None
+def get_tools() -> List[ToolDefinition]
+async def execute_tool(tool_name, arguments) -> ToolResult
+async def health_check() -> bool
+```
+
+**DataPlugin:** For data sources, inherit from `DataPlugin` and implement `search_datasets`, `get_dataset`, and `query_data`.
+
+**Best practices:** Return `ToolResult(success=False, error_message=...)` on failure. Use `logging.getLogger(__name__)`. Validate config in `initialize()`.
+
+**Reference:**
+- [Plugin template](../custom_plugins/template/plugin_template.py)
+- [CKAN plugin](../plugins/ckan/) – Full implementation
+- [Examples](../examples/custom-plugin/) – Custom plugin example
 
 ## Plugin Interface
-
-All plugins implement `MCPPlugin`:
 
 ```python
 class MCPPlugin(ABC):
@@ -123,99 +145,20 @@ class MCPPlugin(ABC):
     async def health_check() -> bool
 ```
 
-Data plugins can extend `DataPlugin` for common operations:
+## Endpoints
 
-```python
-class DataPlugin(MCPPlugin):
-    async def search_datasets(query, limit)
-    async def get_dataset(dataset_id)
-    async def query_data(resource_id, filters, limit)
-```
+| Endpoint | Auth | Use |
+|----------|------|-----|
+| API Gateway | Rate limit, quota | Production |
+| Lambda Function URL | None | Testing |
 
 ## Configuration
 
-Single `config.yaml` file:
+Single `config.yaml`; passed to Lambda via `OPENCONTEXT_CONFIG`. Validated at deploy and runtime.
 
-```yaml
-server_name: "MyMCP"
-plugins:
-  ckan:
-    enabled: true # Only ONE plugin enabled
-    base_url: "..."
-```
+## Security & Scalability
 
-Configuration is:
-
-- Validated at deployment time (`deploy.sh`)
-- Validated at runtime (`plugin_manager.py`)
-
-## Deployment
-
-1. **Fork repository**
-2. **Edit config.yaml** - Enable ONE plugin
-3. **Run deploy.sh** - Validates, packages, deploys
-4. **Get Lambda URL** - Use with Claude Desktop or directly
-
-## Why One Fork = One MCP Server?
-
-### Alternative: Multiple Plugins Per Server
-
-**Problems:**
-
-- Complex configuration
-- Harder to scale (all plugins scale together)
-- Harder to debug (which plugin failed?)
-- Tight coupling between plugins
-
-### Our Approach: One Plugin Per Server
-
-**Benefits:**
-
-- Simple configuration (one plugin, one purpose)
-- Independent scaling (each server scales independently)
-- Clear boundaries (each server has one responsibility)
-- Easy debugging (know exactly what each server does)
-
-### Deploying Multiple Servers
-
-To deploy multiple MCP servers:
-
-1. Fork repository multiple times
-2. Configure one plugin per fork
-3. Deploy each fork separately
-4. Each gets its own Lambda URL
-
-This gives you:
-
-- Multiple independent servers
-- Each with a single, clear purpose
-- Independently scalable and maintainable
-
-## Security
-
-- Lambda Function URLs are public (no authentication)
-- Plugins can use API keys for data source authentication
-- Configuration can use environment variables for secrets
-- CloudWatch logs all requests
-
-## Scalability
-
-- Lambda auto-scales based on request volume
-- Each server scales independently
-- No shared state between servers
-- Stateless design
-
-## Monitoring
-
-- CloudWatch Logs for all requests
-- Structured JSON logging
-- Request IDs for tracing
-- Health check endpoints
-
-## Future Enhancements
-
-- Authentication/authorization
-- Rate limiting
-- Caching layer
-- Additional built-in plugins (as needed)
-- Plugin marketplace
+- **API Gateway:** Rate limiting (100 burst, 50 sustained/s), configurable daily quota
+- **Lambda URL:** Public—testing only
+- **Stateless:** No shared state; Lambda auto-scales
+- **Logging:** CloudWatch, structured JSON, request IDs

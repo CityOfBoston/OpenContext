@@ -1,305 +1,380 @@
-"""Tests for configuration validation using Boston examples."""
+"""Comprehensive tests for configuration validation.
+
+These tests verify that configuration validation correctly enforces
+the "one fork = one MCP server" rule and catches all invalid configurations.
+"""
 
 import pytest
+import tempfile
+import os
 import yaml
+
 from core.validators import (
     ConfigurationError,
     get_enabled_plugin_config,
     load_and_validate_config,
     validate_plugin_count,
+    validate_config_structure,
+    get_logging_config,
 )
 
 
-def test_validate_boston_ckan_plugin_enabled():
-    """Test validation passes with Boston CKAN plugin enabled."""
-    config = {
-        "server_name": "BostonOpenDataMCP",
-        "organization": "City of Boston DoIT",
-        "plugins": {
-            "ckan": {
-                "enabled": True,
-                "base_url": "https://data.boston.gov",
-                "portal_url": "https://data.boston.gov",
-                "city_name": "Boston",
-            },
-        },
-    }
-    enabled, count = validate_plugin_count(config)
-    assert count == 1
-    assert enabled == ["ckan"]
+class TestValidatePluginCount:
+    """Test validate_plugin_count function."""
 
-
-def test_validate_boston_mbta_plugin_enabled():
-    """Test validation passes with Boston MBTA custom plugin enabled."""
-    config = {
-        "server_name": "BostonMBTAMCP",
-        "organization": "City of Boston DoIT",
-        "plugins": {
-            "ckan": {"enabled": False},
-            "mbta": {
-                "enabled": True,
-                "api_base_url": "https://api-v3.mbta.com",
-                "api_key": "${MBTA_API_KEY}",
-                "features": ["predictions", "alerts", "routes"],
-            },
-        },
-    }
-    enabled, count = validate_plugin_count(config)
-    assert count == 1
-    assert enabled == ["mbta"]
-
-
-def test_validate_boston_multiple_plugins_fails():
-    """Test validation fails when Boston tries to enable both CKAN and MBTA."""
-    config = {
-        "server_name": "BostonMultiMCP",
-        "organization": "City of Boston DoIT",
-        "plugins": {
-            "ckan": {
-                "enabled": True,
-                "base_url": "https://data.boston.gov",
-            },
-            "mbta": {
-                "enabled": True,
-                "api_base_url": "https://api-v3.mbta.com",
-            },
-        },
-    }
-    with pytest.raises(ConfigurationError) as exc_info:
-        validate_plugin_count(config)
-
-    error_msg = str(exc_info.value)
-    assert "Multiple Plugins Enabled" in error_msg
-    assert "ckan" in error_msg
-    assert "mbta" in error_msg
-    assert "One Fork = One MCP" in error_msg
-
-
-def test_validate_boston_no_plugins_enabled():
-    """Test validation fails when Boston disables all plugins."""
-    config = {
-        "server_name": "BostonOpenDataMCP",
-        "plugins": {
-            "ckan": {"enabled": False},
-            "mbta": {"enabled": False},
-        },
-    }
-    with pytest.raises(ConfigurationError) as exc_info:
-        validate_plugin_count(config)
-
-    error_msg = str(exc_info.value)
-    assert "No Plugins Enabled" in error_msg
-
-
-def test_get_boston_ckan_plugin_config():
-    """Test extracting Boston CKAN plugin configuration."""
-    config = {
-        "server_name": "BostonOpenDataMCP",
-        "plugins": {
-            "ckan": {
-                "enabled": True,
-                "base_url": "https://data.boston.gov",
-                "portal_url": "https://data.boston.gov",
-                "city_name": "Boston",
-                "timeout": 120,
-            },
-        },
-    }
-
-    plugin_name, plugin_config = get_enabled_plugin_config(config)
-
-    assert plugin_name == "ckan"
-    assert plugin_config["base_url"] == "https://data.boston.gov"
-    assert plugin_config["portal_url"] == "https://data.boston.gov"
-    assert plugin_config["city_name"] == "Boston"
-    assert plugin_config["timeout"] == 120
-
-
-def test_get_boston_mbta_plugin_config():
-    """Test extracting Boston MBTA custom plugin configuration."""
-    config = {
-        "server_name": "BostonMBTAMCP",
-        "plugins": {
-            "ckan": {"enabled": False},
-            "mbta": {
-                "enabled": True,
-                "api_base_url": "https://api-v3.mbta.com",
-                "api_key": "test-key-123",
-                "features": ["predictions", "alerts"],
-            },
-        },
-    }
-
-    plugin_name, plugin_config = get_enabled_plugin_config(config)
-
-    assert plugin_name == "mbta"
-    assert plugin_config["api_base_url"] == "https://api-v3.mbta.com"
-    assert plugin_config["api_key"] == "test-key-123"
-    assert "predictions" in plugin_config["features"]
-
-
-def test_get_enabled_plugin_config_boston_multiple_fails():
-    """Test getting enabled plugin config fails with multiple Boston plugins."""
-    config = {
-        "plugins": {
-            "ckan": {
-                "enabled": True,
-                "base_url": "https://data.boston.gov",
-            },
-            "boston_311_ai": {
-                "enabled": True,
-                "ml_endpoint": "https://internal.boston.gov/ml",
-            },
-        },
-    }
-
-    with pytest.raises(ConfigurationError) as exc_info:
-        get_enabled_plugin_config(config)
-
-    # Should mention both Boston plugins
-    error_msg = str(exc_info.value)
-    assert "ckan" in error_msg
-    assert "boston_311_ai" in error_msg
-
-
-def test_boston_opendata_config_structure():
-    """Test that Boston OpenData config has all required fields."""
-    config = {
-        "server_name": "BostonOpenDataMCP",
-        "description": "Boston's official open data MCP server",
-        "organization": "City of Boston Department of Innovation and Technology",
-        "plugins": {
-            "ckan": {
-                "enabled": True,
-                "base_url": "https://data.boston.gov",
-                "portal_url": "https://data.boston.gov",
-                "city_name": "Boston",
-                "timeout": 120,
-            },
-        },
-        "aws": {
-            "region": "us-east-1",
-            "lambda_name": "boston-opendata-mcp",
-            "lambda_memory": 512,
-            "lambda_timeout": 120,
-        },
-        "logging": {
-            "level": "INFO",
-            "format": "json",
-        },
-    }
-
-    # Validate structure
-    assert "server_name" in config
-    assert "plugins" in config
-    assert "aws" in config
-
-    # Validate Boston-specific values
-    assert config["server_name"] == "BostonOpenDataMCP"
-    assert (
-        config["organization"]
-        == "City of Boston Department of Innovation and Technology"
-    )
-    assert config["plugins"]["ckan"]["city_name"] == "Boston"
-    assert config["aws"]["region"] == "us-east-1"
-
-
-def test_boston_has_only_one_plugin_in_production():
-    """Test that production Boston configs have exactly one plugin enabled."""
-
-    # Boston OpenData config
-    opendata_config = {
-        "plugins": {
-            "ckan": {"enabled": True, "base_url": "https://data.boston.gov"},
-            "mbta": {"enabled": False},
-            "boston_311_ai": {"enabled": False},
+    def test_single_plugin_enabled_returns_correct_count(self):
+        """Test that exactly one enabled plugin returns count=1."""
+        config = {
+            "plugins": {
+                "ckan": {"enabled": True, "base_url": "https://data.example.com"},
+                "other_plugin": {"enabled": False},
+            }
         }
-    }
+        enabled, count = validate_plugin_count(config)
+        assert count == 1
+        assert enabled == ["ckan"]
 
-    enabled, count = validate_plugin_count(opendata_config)
-    assert count == 1
-    assert enabled == ["ckan"]
-
-    # Boston MBTA config (separate fork)
-    mbta_config = {
-        "plugins": {
-            "ckan": {"enabled": False},
-            "mbta": {"enabled": True, "api_base_url": "https://api-v3.mbta.com"},
-            "boston_311_ai": {"enabled": False},
+    def test_no_plugins_enabled_raises_error(self):
+        """Test that zero enabled plugins raises ConfigurationError."""
+        config = {
+            "plugins": {
+                "ckan": {"enabled": False},
+                "other": {"enabled": False},
+            }
         }
-    }
+        with pytest.raises(ConfigurationError) as exc_info:
+            validate_plugin_count(config)
 
-    enabled, count = validate_plugin_count(mbta_config)
-    assert count == 1
-    assert enabled == ["mbta"]
+        error_msg = str(exc_info.value)
+        assert "No Plugins Enabled" in error_msg
+        assert "exactly one plugin" in error_msg.lower()
+
+    def test_multiple_plugins_enabled_raises_error(self):
+        """Test that multiple enabled plugins raises ConfigurationError."""
+        config = {
+            "plugins": {
+                "ckan": {"enabled": True, "base_url": "https://data.example.com"},
+                "mbta": {"enabled": True, "api_url": "https://api.example.com"},
+            }
+        }
+        with pytest.raises(ConfigurationError) as exc_info:
+            validate_plugin_count(config)
+
+        error_msg = str(exc_info.value)
+        assert "Multiple Plugins Enabled" in error_msg
+        assert "ckan" in error_msg
+        assert "mbta" in error_msg
+        assert "One Fork = One MCP Server" in error_msg
+
+    def test_three_plugins_enabled_shows_all_in_error(self):
+        """Test that three enabled plugins all appear in error message."""
+        config = {
+            "plugins": {
+                "ckan": {"enabled": True},
+                "mbta": {"enabled": True},
+                "custom": {"enabled": True},
+            }
+        }
+        with pytest.raises(ConfigurationError) as exc_info:
+            validate_plugin_count(config)
+
+        error_msg = str(exc_info.value)
+        assert "ckan" in error_msg
+        assert "mbta" in error_msg
+        assert "custom" in error_msg
+        assert "3 plugins" in error_msg
+
+    def test_enabled_false_explicitly_not_counted(self):
+        """Test that enabled: false is not counted."""
+        config = {
+            "plugins": {
+                "ckan": {"enabled": False},
+                "mbta": {"enabled": True, "api_url": "https://api.example.com"},
+            }
+        }
+        enabled, count = validate_plugin_count(config)
+        assert count == 1
+        assert enabled == ["mbta"]
+
+    def test_missing_enabled_field_treated_as_false(self):
+        """Test that missing 'enabled' field is treated as False."""
+        config = {
+            "plugins": {
+                "ckan": {"base_url": "https://data.example.com"},  # No 'enabled' field
+                "mbta": {"enabled": True, "api_url": "https://api.example.com"},
+            }
+        }
+        enabled, count = validate_plugin_count(config)
+        assert count == 1
+        assert enabled == ["mbta"]
+
+    def test_empty_plugins_dict_raises_error(self):
+        """Test that empty plugins dict raises error."""
+        config = {"plugins": {}}
+        with pytest.raises(ConfigurationError) as exc_info:
+            validate_plugin_count(config)
+
+        assert "No Plugins Enabled" in str(exc_info.value)
+
+    def test_non_dict_plugin_config_ignored(self):
+        """Test that non-dict plugin configs are ignored."""
+        config = {
+            "plugins": {
+                "ckan": {"enabled": True, "base_url": "https://data.example.com"},
+                "invalid": "not a dict",  # Should be ignored
+            }
+        }
+        enabled, count = validate_plugin_count(config)
+        assert count == 1
+        assert enabled == ["ckan"]
 
 
-def test_boston_invalid_ckan_url_format():
-    """Test that invalid Boston CKAN URLs are caught."""
-    invalid_configs = [
-        # Missing https://
-        {
+class TestValidateConfigStructure:
+    """Test validate_config_structure function."""
+
+    def test_valid_config_structure_passes(self):
+        """Test that valid config structure passes validation."""
+        config = {
+            "server_name": "TestServer",
+            "plugins": {
+                "ckan": {"enabled": True},
+            },
+        }
+        # Should not raise
+        validate_config_structure(config)
+
+    def test_non_dict_config_raises_error(self):
+        """Test that non-dict config raises ConfigurationError."""
+        with pytest.raises(ConfigurationError) as exc_info:
+            validate_config_structure("not a dict")
+
+        assert "must be a YAML dictionary" in str(exc_info.value)
+
+    def test_missing_plugins_section_raises_error(self):
+        """Test that missing plugins section raises error."""
+        config = {"server_name": "TestServer"}
+        with pytest.raises(ConfigurationError) as exc_info:
+            validate_config_structure(config)
+
+        assert "missing 'plugins' section" in str(exc_info.value)
+
+    def test_plugins_not_dict_raises_error(self):
+        """Test that plugins section must be a dict."""
+        config = {"plugins": "not a dict"}
+        with pytest.raises(ConfigurationError) as exc_info:
+            validate_config_structure(config)
+
+        assert "must be a dictionary" in str(exc_info.value)
+
+
+class TestLoadAndValidateConfig:
+    """Test load_and_validate_config function."""
+
+    def test_load_valid_config_succeeds(self):
+        """Test loading a valid config file."""
+        config_data = {
+            "server_name": "TestServer",
             "plugins": {
                 "ckan": {
                     "enabled": True,
-                    "base_url": "data.boston.gov",  # Missing protocol
+                    "base_url": "https://data.example.com",
                 }
+            },
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_data, f)
+            temp_path = f.name
+
+        try:
+            config = load_and_validate_config(temp_path)
+            assert config["server_name"] == "TestServer"
+            assert config["plugins"]["ckan"]["enabled"] is True
+        finally:
+            os.unlink(temp_path)
+
+    def test_load_nonexistent_file_raises_error(self):
+        """Test that loading nonexistent file raises FileNotFoundError."""
+        with pytest.raises(FileNotFoundError):
+            load_and_validate_config("/nonexistent/path/config.yaml")
+
+    def test_load_invalid_yaml_raises_error(self):
+        """Test that invalid YAML raises ConfigurationError."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("invalid: yaml: content: [unclosed")
+            temp_path = f.name
+
+        try:
+            with pytest.raises(ConfigurationError) as exc_info:
+                load_and_validate_config(temp_path)
+            assert "Invalid YAML" in str(exc_info.value)
+        finally:
+            os.unlink(temp_path)
+
+    def test_load_empty_file_raises_error(self):
+        """Test that empty file raises ConfigurationError."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write("")
+            temp_path = f.name
+
+        try:
+            with pytest.raises(ConfigurationError) as exc_info:
+                load_and_validate_config(temp_path)
+            assert "empty" in str(exc_info.value).lower()
+        finally:
+            os.unlink(temp_path)
+
+    def test_load_config_with_multiple_plugins_raises_error(self):
+        """Test that config with multiple enabled plugins fails validation."""
+        config_data = {
+            "plugins": {
+                "ckan": {"enabled": True},
+                "mbta": {"enabled": True},
             }
-        },
-        # Trailing slash (should be handled gracefully)
-        {
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_data, f)
+            temp_path = f.name
+
+        try:
+            with pytest.raises(ConfigurationError) as exc_info:
+                load_and_validate_config(temp_path)
+            assert "Multiple Plugins Enabled" in str(exc_info.value)
+        finally:
+            os.unlink(temp_path)
+
+    def test_load_config_with_no_plugins_raises_error(self):
+        """Test that config with no enabled plugins fails validation."""
+        config_data = {
+            "plugins": {
+                "ckan": {"enabled": False},
+            }
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(config_data, f)
+            temp_path = f.name
+
+        try:
+            with pytest.raises(ConfigurationError) as exc_info:
+                load_and_validate_config(temp_path)
+            assert "No Plugins Enabled" in str(exc_info.value)
+        finally:
+            os.unlink(temp_path)
+
+
+class TestGetEnabledPluginConfig:
+    """Test get_enabled_plugin_config function."""
+
+    def test_get_single_enabled_plugin_config(self):
+        """Test getting config for single enabled plugin."""
+        config = {
             "plugins": {
                 "ckan": {
                     "enabled": True,
-                    "base_url": "https://data.boston.gov/",  # Trailing slash
+                    "base_url": "https://data.example.com",
+                    "city_name": "TestCity",
                 }
             }
-        },
-    ]
-
-    # These should either raise validation errors or be normalized
-    # Depending on your validation implementation
-    for config in invalid_configs:
-        # Your validator might handle or reject these
-        # Add appropriate assertions based on your validation logic
-        pass
-
-
-def test_error_message_helpful_for_boston_users():
-    """Test that error messages are helpful for Boston staff."""
-    config = {
-        "plugins": {
-            "ckan": {"enabled": True},
-            "boston_311_ai": {"enabled": True},
         }
-    }
+        plugin_name, plugin_config = get_enabled_plugin_config(config)
 
-    with pytest.raises(ConfigurationError) as exc_info:
-        validate_plugin_count(config)
+        assert plugin_name == "ckan"
+        assert plugin_config["base_url"] == "https://data.example.com"
+        assert plugin_config["city_name"] == "TestCity"
 
-    error_msg = str(exc_info.value)
+    def test_get_enabled_plugin_with_multiple_plugins_raises_error(self):
+        """Test that multiple enabled plugins raises error."""
+        config = {
+            "plugins": {
+                "ckan": {"enabled": True},
+                "mbta": {"enabled": True},
+            }
+        }
+        with pytest.raises(ConfigurationError) as exc_info:
+            get_enabled_plugin_config(config)
 
-    # Error should be helpful
-    assert "Fork this repository again" in error_msg
-    assert "opencontext-opendata" in error_msg or "example" in error_msg.lower()
-    assert "./deploy.sh" in error_msg
-    assert "docs/ARCHITECTURE.md" in error_msg
+        assert "Multiple Plugins Enabled" in str(exc_info.value)
+
+    def test_get_enabled_plugin_with_no_plugins_raises_error(self):
+        """Test that no enabled plugins raises error."""
+        config = {
+            "plugins": {
+                "ckan": {"enabled": False},
+            }
+        }
+        with pytest.raises(ConfigurationError) as exc_info:
+            get_enabled_plugin_config(config)
+
+        assert "No Plugins Enabled" in str(exc_info.value)
+
+    def test_get_enabled_plugin_preserves_all_config_keys(self):
+        """Test that all config keys are preserved."""
+        config = {
+            "plugins": {
+                "ckan": {
+                    "enabled": True,
+                    "base_url": "https://data.example.com",
+                    "portal_url": "https://portal.example.com",
+                    "city_name": "TestCity",
+                    "timeout": 120,
+                    "api_key": "test-key-123",
+                }
+            }
+        }
+        plugin_name, plugin_config = get_enabled_plugin_config(config)
+
+        assert plugin_name == "ckan"
+        assert len(plugin_config) == 6
+        assert plugin_config["base_url"] == "https://data.example.com"
+        assert plugin_config["portal_url"] == "https://portal.example.com"
+        assert plugin_config["city_name"] == "TestCity"
+        assert plugin_config["timeout"] == 120
+        assert plugin_config["api_key"] == "test-key-123"
+        assert plugin_config["enabled"] is True
 
 
-def test_boston_config_with_environment_variables():
-    """Test Boston config can use environment variable placeholders."""
-    config = {
-        "plugins": {
-            "ckan": {
-                "enabled": True,
-                "base_url": "https://data.boston.gov",
-                "api_key": "${BOSTON_CKAN_API_KEY}",  # Environment variable
-            },
-        },
-    }
+class TestGetLoggingConfig:
+    """Test get_logging_config function."""
 
-    plugin_name, plugin_config = get_enabled_plugin_config(config)
+    def test_get_logging_config_with_explicit_values(self):
+        """Test getting logging config with explicit values."""
+        config = {
+            "logging": {
+                "level": "DEBUG",
+                "format": "pretty",
+            }
+        }
+        logging_config = get_logging_config(config)
 
-    assert plugin_name == "ckan"
-    # The placeholder should be preserved (expanded at runtime)
-    assert plugin_config["api_key"] == "${BOSTON_CKAN_API_KEY}"
+        assert logging_config["level"] == "DEBUG"
+        assert logging_config["format"] == "pretty"
+
+    def test_get_logging_config_with_defaults(self):
+        """Test getting logging config with defaults."""
+        config = {}
+        logging_config = get_logging_config(config)
+
+        assert logging_config["level"] == "INFO"
+        assert logging_config["format"] == "json"
+
+    def test_get_logging_config_with_partial_values(self):
+        """Test getting logging config with partial values."""
+        config = {
+            "logging": {
+                "level": "WARNING",
+            }
+        }
+        logging_config = get_logging_config(config)
+
+        assert logging_config["level"] == "WARNING"
+        assert logging_config["format"] == "json"  # Default
+
+    def test_get_logging_config_with_empty_logging_section(self):
+        """Test getting logging config with empty logging section."""
+        config = {"logging": {}}
+        logging_config = get_logging_config(config)
+
+        assert logging_config["level"] == "INFO"
+        assert logging_config["format"] == "json"

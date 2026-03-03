@@ -1,0 +1,12 @@
+---
+extends: default
+
+rules:
+  document-start: enable
+  line-length:
+    max: 250
+    allow-non-breakable-inline-mappings: true
+  truthy:
+    allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
+  comments:
+    min-spaces-from-content: 1

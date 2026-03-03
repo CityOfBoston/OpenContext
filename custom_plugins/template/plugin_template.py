@@ -68,7 +68,9 @@ class MyCustomPlugin(MCPPlugin):
             return True
 
         except Exception as e:
-            logger.error(f"Failed to initialize {self.plugin_name} plugin: {e}", exc_info=True)
+            logger.error(
+                f"Failed to initialize {self.plugin_name} plugin: {e}", exc_info=True
+            )
             return False
 
     async def shutdown(self) -> None:
@@ -191,4 +193,3 @@ class MyCustomPlugin(MCPPlugin):
     # def _format_result(self, data: Dict[str, Any]) -> str:
     #     """Helper method to format results for display."""
     #     return f"Result: {data}"
-

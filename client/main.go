@@ -45,8 +45,13 @@ type Client struct {
 
 // NewClient creates a new Client instance
 func NewClient(lambdaURL string, timeout time.Duration) *Client {
+	// Ensure URL ends with /mcp endpoint
+	url := strings.TrimRight(lambdaURL, "/")
+	if !strings.HasSuffix(url, "/mcp") {
+		url = url + "/mcp"
+	}
 	return &Client{
-		lambdaURL: strings.TrimRight(lambdaURL, "/"),
+		lambdaURL: url,
 		client: &http.Client{
 			Timeout: timeout,
 		},
@@ -92,6 +97,11 @@ func (c *Client) HandleRequest(req *JSONRPCRequest) *JSONRPCResponse {
 		}
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+
+	// Add API key header if API_KEY environment variable is set
+	if apiKey := os.Getenv("API_KEY"); apiKey != "" {
+		httpReq.Header.Set("x-api-key", apiKey)
+	}
 
 	// Send request
 	resp, err := c.client.Do(httpReq)
@@ -186,7 +196,7 @@ func (c *Client) HandleRequest(req *JSONRPCRequest) *JSONRPCResponse {
 // Run starts the client loop
 func (c *Client) Run() error {
 	scanner := bufio.NewScanner(os.Stdin)
-	
+
 	// Set a large buffer size for long lines if needed, but default is usually fine (64k)
 	// We'll stick to default for now as it matches Python's line reading
 

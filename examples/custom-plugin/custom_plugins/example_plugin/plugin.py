@@ -132,4 +132,3 @@ class ExamplePlugin(MCPPlugin):
             return response.status_code == 200
         except Exception:
             return False
-

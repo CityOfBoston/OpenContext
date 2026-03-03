@@ -1,3 +1,4 @@
+---
 name: Release
 
 on:
@@ -81,9 +82,60 @@ jobs:
           path: ${{ matrix.output }}
           retention-days: 7
 
+  build-lambda-zip:
+    name: Build Lambda ZIP
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=${GITHUB_REF#refs/tags/}
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Install Python dependencies into package directory
+        run: uv pip install --target ./package -r requirements.txt
+
+      - name: Copy application code into package
+        run: |
+          cp -r server/ package/server/
+          cp -r plugins/ package/plugins/
+          cp -r core/ package/core/
+          cp examples/boston-opendata/config.yaml package/config.yaml
+
+      - name: Create Lambda ZIP
+        run: |
+          cd package
+          zip -r ../opencontext-lambda-${{ steps.get_version.outputs.version }}.zip .
+
+      - name: Upload Lambda ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lambda-zip
+          path: opencontext-lambda-${{ steps.get_version.outputs.version }}.zip
+          retention-days: 7
+
   release:
     name: Create release
-    needs: build
+    needs: [build, build-lambda-zip]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -120,23 +172,15 @@ jobs:
         run: |
           cd artifacts
           echo "=== Flattening artifacts ==="
-          # Find all binaries (they may be in subdirectories) and move to artifacts root
-          # We need to use a temp name because directories have the same name as files
-          find . -mindepth 2 -type f -name "opencontext-client-*" | while read file; do
+          # Find all release files (binaries + lambda zip) in subdirectories and move to root
+          find . -mindepth 2 -type f \( -name "opencontext-client-*" -o -name "opencontext-lambda-*" \) | while read file; do
             filename=$(basename "$file")
             dirname=$(dirname "$file")
             tempname=".tmp_${filename}"
             echo "Moving: $file to $filename (via $tempname)"
-            # Move to temp name first to avoid conflict with directory
             mv "$file" "$tempname"
-            # Remove the now-empty directory
             rmdir "$dirname" 2>/dev/null || true
-            # Rename temp file to final name
             mv "$tempname" "$filename"
-          done
-          # Also handle files that might already be at depth 1
-          find . -mindepth 1 -maxdepth 1 -type f -name "opencontext-client-*" | while read file; do
-            echo "File already at root: $file"
           done
           # Remove any remaining empty subdirectories
           find . -mindepth 1 -type d -empty -delete
@@ -154,7 +198,7 @@ jobs:
         run: |
           cd artifacts
           echo "=== Generating checksums ==="
-          find . -maxdepth 1 -type f -name "opencontext-client-*" -exec sha256sum {} \; > checksums.txt
+          find . -maxdepth 1 -type f \( -name "opencontext-client-*" -o -name "opencontext-lambda-*" \) -exec sha256sum {} \; > checksums.txt
           echo "=== Checksums file contents ==="
           cat checksums.txt
           echo ""
@@ -166,22 +210,29 @@ jobs:
           echo "=== Files to be uploaded ==="
           ls -lah artifacts/
           echo ""
-          echo "=== Checking each binary file ==="
+          echo "=== Checking each release file ==="
           for file in artifacts/opencontext-client-darwin-amd64 \
                       artifacts/opencontext-client-darwin-arm64 \
                       artifacts/opencontext-client-linux-amd64 \
                       artifacts/opencontext-client-linux-arm64 \
                       artifacts/opencontext-client-windows-amd64.exe; do
             if [ -f "$file" ]; then
-              echo "✅ Found: $file ($(du -h "$file" | cut -f1))"
+              echo "Found: $file ($(du -h "$file" | cut -f1))"
             else
-              echo "❌ Missing: $file"
+              echo "Missing: $file"
             fi
           done
-          if [ -f "artifacts/checksums.txt" ]; then
-            echo "✅ Found: artifacts/checksums.txt"
+          LAMBDA_ZIP=$(find artifacts -maxdepth 1 -name "opencontext-lambda-*.zip" | head -1)
+          if [ -n "$LAMBDA_ZIP" ]; then
+            echo "Found: $LAMBDA_ZIP ($(du -h "$LAMBDA_ZIP" | cut -f1))"
           else
-            echo "❌ Missing: artifacts/checksums.txt"
+            echo "Missing: Lambda ZIP"
+            exit 1
+          fi
+          if [ -f "artifacts/checksums.txt" ]; then
+            echo "Found: artifacts/checksums.txt"
+          else
+            echo "Missing: artifacts/checksums.txt"
             exit 1
           fi
 
@@ -202,6 +253,10 @@ jobs:
             - **Linux** (amd64): `opencontext-client-linux-amd64`
             - **Linux** (arm64): `opencontext-client-linux-arm64`
             - **Windows** (amd64): `opencontext-client-windows-amd64.exe`
+
+            ### Lambda Package
+
+            - `opencontext-lambda-${{ steps.get_version.outputs.version }}.zip` — deploy-ready AWS Lambda package
 
             ### Installation
 
@@ -237,6 +292,7 @@ jobs:
             artifacts/opencontext-client-linux-amd64
             artifacts/opencontext-client-linux-arm64
             artifacts/opencontext-client-windows-amd64.exe
+            artifacts/opencontext-lambda-*.zip
             artifacts/checksums.txt
           draft: false
           prerelease: ${{ contains(steps.get_version.outputs.version, '-') || contains(steps.get_version.outputs.version, 'alpha') || contains(steps.get_version.outputs.version, 'beta') || contains(steps.get_version.outputs.version, 'rc') }}

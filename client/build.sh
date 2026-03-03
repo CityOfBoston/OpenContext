@@ -12,7 +12,7 @@ for PLATFORM in "${PLATFORMS[@]}"; do
     GOOS=${PLATFORM%/*}
     GOARCH=${PLATFORM#*/}
     OUTPUT_NAME="${APP_NAME}-${GOOS}-${GOARCH}"
-    
+
     if [ "$GOOS" = "windows" ]; then
         OUTPUT_NAME+=".exe"
     fi

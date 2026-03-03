@@ -49,7 +49,7 @@ def validate_plugin_count(config: Dict[str, Any]) -> Tuple[List[str], int]:
             "To enable a plugin, set 'enabled: true' for:\n"
             "  • ckan\n"
             "  • A custom plugin in custom_plugins/\n\n"
-            "See docs/QUICKSTART.md for setup instructions."
+            "See docs/GETTING_STARTED.md for setup instructions."
         )
 
     if count > 1:
@@ -69,7 +69,7 @@ def validate_plugin_count(config: Dict[str, Any]) -> Tuple[List[str], int]:
             f"     Fork #1: Enable {enabled_plugins[0]} only\n"
             f"     Fork #2: Enable {enabled_plugins[1]} only\n\n"
             f"  3. Deploy each fork separately\n"
-            f"     ./deploy.sh (in each fork)\n\n"
+            f"     ./scripts/deploy.sh (in each fork)\n\n"
             f"See docs/ARCHITECTURE.md for details."
         )
 
@@ -138,6 +138,22 @@ def load_and_validate_config(config_path: str = "config.yaml") -> Dict[str, Any]
     return config
 
 
+def get_logging_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Get logging configuration from config dictionary.
+
+    Args:
+        config: Parsed configuration dictionary
+
+    Returns:
+        Dictionary with logging configuration (level, format)
+    """
+    logging_config = config.get("logging", {})
+    return {
+        "level": logging_config.get("level", "INFO"),
+        "format": logging_config.get("format", "json"),
+    }
+
+
 def get_enabled_plugin_config(config: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
     """Get the configuration for the single enabled plugin.
 
@@ -154,12 +170,9 @@ def get_enabled_plugin_config(config: Dict[str, Any]) -> Tuple[str, Dict[str, An
 
     if len(enabled_plugins) != 1:
         # This should never happen if validate_plugin_count was called first
-        raise ConfigurationError(
-            "Internal error: Expected exactly one enabled plugin"
-        )
+        raise ConfigurationError("Internal error: Expected exactly one enabled plugin")
 
     plugin_name = enabled_plugins[0]
     plugin_config = config["plugins"][plugin_name]
 
     return plugin_name, plugin_config
-

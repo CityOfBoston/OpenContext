@@ -1,2 +1,1 @@
 """CKAN plugin for OpenContext."""
-

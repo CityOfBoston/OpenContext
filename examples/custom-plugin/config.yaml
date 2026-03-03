@@ -1,3 +1,4 @@
+---
 # Custom Plugin MCP Server Configuration
 # Example: Custom plugin for a government API
 
@@ -26,4 +27,3 @@ aws:
 logging:
   level: "INFO"
   format: "json"
-

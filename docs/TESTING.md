@@ -1,267 +1,130 @@
 # Testing Guide
 
-This guide covers different ways to test your OpenContext MCP server.
+This guide covers three ways to test your OpenContext server locally.
 
-## Quick Test
+## Prerequisites
 
-### 1. Test Configuration
+Before testing:
+
+1. Create `config.yaml` from `config-example.yaml` and enable exactly one plugin
+2. Install dependencies: `pip install aiohttp`
+3. Start the server: `python3 scripts/local_server.py`
+
+The server runs at `http://localhost:8000/mcp`. Keep it running while you test.
+
+---
+
+## Method 1: Terminal (cURL)
+
+Use the terminal to send requests directly to the server.
+
+**Ping:**
+
+```bash
+curl -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'
+```
+
+**List tools:**
+
+```bash
+curl -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+```
+
+**Call a tool:**
+
+```bash
+curl -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ckan__search_datasets","arguments":{"query":"housing","limit":3}}}'
+```
+
+For a full test (initialize, list tools, call tool), run:
+
+```bash
+./scripts/test_streamable_http.sh
+```
+
+---
+
+## Method 2: Claude Desktop
+
+1. Add the server to your Claude Desktop config (see [Getting Started](GETTING_STARTED.md))
+2. Point the URL to `http://localhost:8000/mcp`
+3. Restart Claude Desktop
+4. Ask Claude to search your data or list available tools
+
+---
+
+## Method 3: MCP Inspector
+
+MCP Inspector is a web-based tool for testing MCP servers.
+
+1. With the server running, open a new terminal
+2. Run: `npx @modelcontextprotocol/inspector`
+3. The Inspector UI opens in your browser (typically `http://localhost:6274`)
+4. In the Inspector, select **streamable-http** as the transport
+5. Enter the URL: `http://localhost:8000/mcp`
+6. Use the Tools tab to list and call tools
+
+---
+
+## Quick Checks
+
+Optional checks before starting the server.
+
+**Config validation:**
 
 ```bash
 python3 -c "
 import yaml
 from core.validators import load_and_validate_config
-
-try:
-    config = load_and_validate_config('config.yaml')
-    print('✅ Configuration is valid!')
-    print(f'   Server: {config[\"server_name\"]}')
-    print(f'   Plugin enabled: {list(config[\"plugins\"].keys())[0]}')
-except Exception as e:
-    print(f'❌ Configuration error: {e}')
+config = load_and_validate_config('config.yaml')
+print('Config valid:', config['server_name'])
 "
 ```
 
-### 2. Test Plugin Loading
+**Plugin loading:**
 
 ```bash
 python3 -c "
-import asyncio
-import yaml
+import asyncio, yaml
 from core.plugin_manager import PluginManager
-
-async def test():
-    with open('config.yaml') as f:
-        config = yaml.safe_load(f)
-
-    manager = PluginManager(config)
-    try:
-        await manager.load_plugins()
-        print('✅ Plugin loaded successfully!')
-        print(f'   Plugin: {list(manager.plugins.keys())[0]}')
-        print(f'   Tools available: {len(manager.get_all_tools())}')
-        for tool in manager.get_all_tools():
-            print(f'     - {tool[\"name\"]}')
-        await manager.shutdown()
-    except Exception as e:
-        print(f'❌ Error: {e}')
-
-asyncio.run(test())
+async def t():
+    with open('config.yaml') as f: config = yaml.safe_load(f)
+    pm = PluginManager(config)
+    await pm.load_plugins()
+    print('Tools:', [t['name'] for t in pm.get_all_tools()])
+    await pm.shutdown()
+asyncio.run(t())
 "
 ```
 
-### 3. Test Local Server
-
-**Terminal 1 - Start the server:**
-
-```bash
-# Install aiohttp if needed
-pip install aiohttp
-
-# Start local server
-python3 local_server.py
-```
-
-**Terminal 2 - Test with curl:**
-
-```bash
-# Test ping
-curl -X POST http://localhost:8000 \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'
-
-# Test tools/list
-curl -X POST http://localhost:8000 \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
-
-# Test search_datasets
-curl -X POST http://localhost:8000 \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc":"2.0",
-    "id":3,
-    "method":"tools/call",
-    "params":{
-      "name":"ckan__search_datasets",
-      "arguments":{"query":"housing","limit":3}
-    }
-  }'
-```
+---
 
 ## Unit Tests
 
-Run the test suite:
-
 ```bash
-# Install test dependencies
-pip install pytest pytest-asyncio
-
-# Run all tests
+pip install pytest pytest-asyncio sqlparse
 pytest
-
-# Run specific test file
-pytest tests/test_plugin_manager.py
-
-# Run with verbose output
-pytest -v
-
-# Run with coverage
+pytest tests/test_plugin_manager.py -v
 pytest --cov=core --cov=plugins
 ```
 
-## Example Requests
+---
 
-### Basic MCP Protocol
+## Testing Against Production
 
-**Ping:**
-
-```bash
-curl -X POST http://localhost:8000 \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'
-```
-
-**Initialize:**
+To test a deployed server, use the Lambda URL or API Gateway URL:
 
 ```bash
-curl -X POST http://localhost:8000 \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"initialize","params":{}}'
-```
-
-**List Tools:**
-
-```bash
-curl -X POST http://localhost:8000 \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/list"}'
-```
-
-### CKAN Plugin Tools
-
-**Search Datasets:**
-
-```bash
-curl -X POST http://localhost:8000 \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc":"2.0",
-    "id":4,
-    "method":"tools/call",
-    "params":{
-      "name":"ckan__search_datasets",
-      "arguments":{"query":"housing","limit":5}
-    }
-  }'
-```
-
-**Get Dataset:**
-
-```bash
-curl -X POST http://localhost:8000 \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc":"2.0",
-    "id":5,
-    "method":"tools/call",
-    "params":{
-      "name":"ckan__get_dataset",
-      "arguments":{"dataset_id":"311-service-requests"}
-    }
-  }'
-```
-
-**Query Data:**
-
-```bash
-curl -X POST http://localhost:8000 \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc":"2.0",
-    "id":6,
-    "method":"tools/call",
-    "params":{
-      "name":"ckan__query_data",
-      "arguments":{
-        "resource_id":"YOUR_RESOURCE_ID",
-        "limit":10
-      }
-    }
-  }'
-```
-
-## Testing Lambda Deployment
-
-After deploying with `./deploy.sh`, test your Lambda URL:
-
-```bash
-# Replace with your actual Lambda URL
 LAMBDA_URL="https://your-lambda-url.lambda-url.us-east-1.on.aws"
-
-# Test ping
-curl -X POST $LAMBDA_URL \
+curl -X POST $LAMBDA_URL/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'
-
-# Test tools/list
-curl -X POST $LAMBDA_URL \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 ```
 
-## Testing with Go Client
-
-If you've built the Go client:
-
-```bash
-# Build client
-cd client && make build && cd ..
-
-# Test ping
-echo '{"jsonrpc":"2.0","id":1,"method":"ping"}' | \
-  ./client/opencontext-client http://localhost:8000
-
-# Test tools/list
-echo '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | \
-  ./client/opencontext-client http://localhost:8000
-```
-
-## Troubleshooting
-
-### Local Server Won't Start
-
-**Error:** `ModuleNotFoundError: No module named 'aiohttp'`
-
-**Solution:**
-
-```bash
-pip install aiohttp
-```
-
-### Plugin Initialization Fails
-
-**Check:**
-
-1. Data source URL is correct in `config.yaml`
-2. Data source is publicly accessible
-3. Internet connection works
-4. API keys are set (if required)
-
-### Connection Timeout
-
-**Solutions:**
-
-1. Increase timeout in `config.yaml`:
-   ```yaml
-   plugins:
-     ckan:
-       timeout: 120 # Increase if needed
-   ```
-2. Check data source is accessible
-3. Check firewall/network settings
-
-## Next Steps
-
-- [Deployment Guide](DEPLOYMENT.md) - Deploy to AWS Lambda
-- [Architecture Guide](ARCHITECTURE.md) - Understand the system
-- [Custom Plugins Guide](CUSTOM_PLUGINS.md) - Create custom plugins
+See [Deployment](DEPLOYMENT.md) for how to get the URL.

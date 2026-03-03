@@ -12,8 +12,9 @@ func TestNewClient(t *testing.T) {
 	url := "http://example.com/"
 	client := NewClient(url, 10*time.Second)
 
-	if client.lambdaURL != "http://example.com" {
-		t.Errorf("Expected lambdaURL to be 'http://example.com', got '%s'", client.lambdaURL)
+	// NewClient appends /mcp if not present (MCP protocol endpoint)
+	if client.lambdaURL != "http://example.com/mcp" {
+		t.Errorf("Expected lambdaURL to be 'http://example.com/mcp', got '%s'", client.lambdaURL)
 	}
 	if client.client.Timeout != 10*time.Second {
 		t.Errorf("Expected timeout to be 10s, got %v", client.client.Timeout)

@@ -7,11 +7,10 @@ Enforces the "one fork = one MCP server" rule at runtime.
 import importlib
 import inspect
 import logging
-import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
-from core.interfaces import MCPPlugin, ToolDefinition, ToolResult
+from core.interfaces import MCPPlugin, ToolResult
 from core.validators import ConfigurationError, get_enabled_plugin_config
 
 logger = logging.getLogger(__name__)
@@ -39,7 +38,9 @@ class PluginManager:
         """
         self.config = config
         self.plugins: Dict[str, MCPPlugin] = {}
-        self.tools: Dict[str, Tuple[str, str]] = {}  # tool_name -> (plugin_name, tool_name)
+        self.tools: Dict[
+            str, Tuple[str, str]
+        ] = {}  # tool_name -> (plugin_name, tool_name)
         self._initialized = False
 
     def discover_plugins(self) -> List[Tuple[str, Path]]:
@@ -69,7 +70,9 @@ class PluginManager:
                     if plugin_file.exists():
                         discovered.append((plugin_dir.name, plugin_dir))
 
-        logger.debug(f"Discovered {len(discovered)} plugins: {[p[0] for p in discovered]}")
+        logger.debug(
+            f"Discovered {len(discovered)} plugins: {[p[0] for p in discovered]}"
+        )
         return discovered
 
     def _load_plugin_class(self, plugin_name: str, plugin_path: Path) -> type:
@@ -208,9 +211,7 @@ class PluginManager:
             prefixed_name = f"{plugin_name}__{tool_def.name}"
 
             if prefixed_name in self.tools:
-                logger.warning(
-                    f"Tool {prefixed_name} already registered, overwriting"
-                )
+                logger.warning(f"Tool {prefixed_name} already registered, overwriting")
 
             self.tools[prefixed_name] = (plugin_name, tool_def.name)
             logger.debug(f"Registered tool: {prefixed_name}")
@@ -234,7 +235,9 @@ class PluginManager:
             RuntimeError: If plugin execution fails
         """
         if not self._initialized:
-            raise RuntimeError("Plugin Manager not initialized. Call load_plugins() first.")
+            raise RuntimeError(
+                "Plugin Manager not initialized. Call load_plugins() first."
+            )
 
         if tool_name not in self.tools:
             available = ", ".join(sorted(self.tools.keys()))
@@ -256,10 +259,11 @@ class PluginManager:
                 f"Error executing tool {tool_name} in plugin {plugin_name}: {e}",
                 exc_info=True,
             )
+            error_msg = str(e) if str(e) else "Tool execution failed"
             return ToolResult(
                 content=[],
                 success=False,
-                error_message=f"Tool execution failed: {str(e)}",
+                error_message=error_msg,
             )
 
     def get_all_tools(self) -> List[Dict[str, Any]]:
@@ -319,4 +323,3 @@ class PluginManager:
     def is_initialized(self) -> bool:
         """Check if Plugin Manager has been initialized."""
         return self._initialized
-

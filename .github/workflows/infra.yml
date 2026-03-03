@@ -1,0 +1,74 @@
+---
+name: Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "terraform/**"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "terraform/**"
+
+jobs:
+  terraform-validate:
+    name: Terraform validate
+    runs-on: ubuntu-latest
+    env:
+      TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/.terraform.d/plugin-cache
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cache Terraform providers
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/.terraform.d/plugin-cache
+          key: ${{ runner.os }}-terraform-${{ hashFiles('terraform/**/.terraform.lock.hcl') }}
+
+      - name: Cache Terraform init
+        uses: actions/cache@v4
+        with:
+          path: terraform/aws/.terraform
+          key: ${{ runner.os }}-tf-init-${{ hashFiles('terraform/**/.terraform.lock.hcl') }}
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Check Terraform formatting
+        working-directory: ./terraform
+        run: |
+          if ! terraform fmt -check -recursive; then
+            echo "Terraform files are not properly formatted."
+            echo "Run 'terraform fmt -recursive' locally and commit the result."
+            exit 1
+          fi
+
+      - name: Terraform init (no backend)
+        working-directory: ./terraform/aws
+        run: terraform init -backend=false
+
+      - name: Create placeholder Lambda zip for validation
+        working-directory: ./terraform/aws
+        run: |
+          python3 -c "import zipfile; zipfile.ZipFile('lambda-deployment.zip', 'w').close()"
+
+      - name: Terraform validate
+        working-directory: ./terraform/aws
+        run: terraform validate
+
+      - name: Set up TFLint
+        uses: terraform-linters/setup-tflint@v4
+
+      - name: Run TFLint
+        run: tflint --chdir=terraform/aws
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: terraform/
+          additional_args: --soft-fail

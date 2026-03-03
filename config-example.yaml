@@ -1,0 +1,65 @@
+# OpenContext Configuration Template
+# ====================================
+#
+# Copy this file to config.yaml and customize it for your deployment:
+#   cp config-example.yaml config.yaml
+#
+# ⚠️  IMPORTANT: Enable ONLY ONE plugin per fork/deployment
+#
+# OpenContext enforces: One Fork = One MCP Server
+#
+# This keeps deployments:
+#   ✓ Simple and focused
+#   ✓ Independently scalable
+#   ✓ Easy to maintain
+#
+# To deploy multiple MCP servers:
+#   1. Fork this repository again
+#   2. Configure ONE plugin per fork
+#   3. Deploy each fork separately
+#
+# See docs/ARCHITECTURE.md for details.
+
+---
+# Server metadata
+server_name: "Your Organization OpenData MCP" # e.g., "Boston OpenData MCP"
+description: "Your organization's open data MCP server - Safe, conversational access to your open data"
+organization: "Your Organization Name" # e.g., "City of Boston"
+
+# Plugin configuration
+# ====================
+#
+# IMPORTANT: Enable ONLY ONE plugin below
+# For additional MCP servers, fork this repository again
+#
+plugins:
+  # Built-in: CKAN (for CKAN-based open data portals)
+  # Examples: data.boston.gov, data.gov, data.gov.uk
+  ckan:
+    enabled: false # Set to true to use
+    base_url: "https://data.example.gov/" # CKAN API base URL
+    portal_url: "https://data.example.gov/" # Public portal URL
+    city_name: "Your City" # City/organization name
+    timeout: 120 # HTTP timeout in seconds
+    # api_key: "${CKAN_API_KEY}"  # Optional: CKAN API key for authenticated requests
+
+  # yamllint disable rule:comments-indentation
+  # Custom: Add your own plugins here
+  # Example:
+  # my_custom_plugin:
+  #   enabled: false
+  #   custom_config_key: "value"
+  #   api_endpoint: "https://api.example.com"
+  # yamllint enable rule:comments-indentation
+
+# AWS deployment settings
+aws:
+  region: "us-east-1" # AWS region for Lambda
+  lambda_name: "your-opendata-mcp" # Lambda function name (will be auto-generated if not set)
+  lambda_memory: 512 # Lambda memory in MB (128-10240)
+  lambda_timeout: 120 # Lambda timeout in seconds (max 900)
+
+# Logging configuration
+logging:
+  level: "INFO" # Log level: DEBUG, INFO, WARNING, ERROR
+  format: "json" # Log format: json or text

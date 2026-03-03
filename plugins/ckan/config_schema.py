@@ -13,10 +13,16 @@ class CKANPluginConfig(BaseModel):
     """
 
     enabled: bool = Field(default=False, description="Whether plugin is enabled")
-    base_url: str = Field(..., description="Base URL of CKAN API (e.g., https://data.yourcity.gov)")
-    portal_url: str = Field(..., description="Public portal URL (e.g., https://data.yourcity.gov)")
+    base_url: str = Field(
+        ..., description="Base URL of CKAN API (e.g., https://data.yourcity.gov)"
+    )
+    portal_url: str = Field(
+        ..., description="Public portal URL (e.g., https://data.yourcity.gov)"
+    )
     city_name: str = Field(..., description="Name of the city/organization")
-    timeout: int = Field(default=120, ge=1, le=300, description="HTTP request timeout in seconds")
+    timeout: int = Field(
+        default=120, ge=1, le=300, description="HTTP request timeout in seconds"
+    )
     api_key: Optional[str] = Field(
         None, description="Optional CKAN API key for authenticated requests"
     )
@@ -38,4 +44,3 @@ class CKANPluginConfig(BaseModel):
         return v.rstrip("/")
 
     model_config = ConfigDict(extra="forbid")  # Reject unknown fields
-

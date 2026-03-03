@@ -1,0 +1,47 @@
+# Pre-commit hooks for OpenContext
+# Install: pre-commit install
+# Run manually: pre-commit run --all-files
+# See https://pre-commit.com for more
+
+repos:
+  # General file hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  # Python: Ruff lint (with auto-fix) and format (matches CI: core/ plugins/ server/ tests/)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.1
+    hooks:
+      - id: ruff-check
+        args: [--fix, --unsafe-fixes]
+        files: ^(core|plugins|server|tests)/
+      - id: ruff-format
+        files: ^(core|plugins|server|tests)/
+
+  # YAML linting (uses .yamllint.yaml in repo root)
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        args: [-c, .yamllint.yaml]
+
+  # Go formatting (client/ only)
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: gofmt
+        args: [-w]
+        language: system
+        types: [go]
+        files: ^client/
+
+  # pip-audit runs in CI; run manually: pip-audit -r requirements.txt
