@@ -33,10 +33,131 @@ Custom plugins allow you to integrate OpenContext with your own APIs, databases,
 
 All plugins must:
 
-1. Inherit from `MCPPlugin` (or `DataPlugin` for data sources)
+1. Inherit from `MCPPlugin` (or `DataPlugin` for data sources, or `BaseOpenDataPlugin` for the shared base)
 2. Set class attributes: `plugin_name`, `plugin_type`, `plugin_version`
 3. Implement all required methods
 4. Be placed in `custom_plugins/your_plugin_name/plugin.py`
+
+> **Tip:** The recommended starting point for new open-data providers is `BaseOpenDataPlugin` (see the [plugin template](../custom_plugins/template/plugin_template.py)). It bundles HTTP client lifecycle, retry policy, error translation, and tool dispatch so you only fill in the provider-specific logic.
+
+## The Decoupled Base Layer (Recommended)
+
+The plugin architecture is split into three layers so provider plugins stay
+small and share hardened infrastructure instead of re-implementing it:
+
+```
+core/interfaces.py        # Contracts: MCPPlugin, DataPlugin, ToolDefinition, ToolResult
+core/base_plugin.py       # BaseOpenDataPlugin + ToolHandler: HTTP, retry, dispatch, formatting
+core/config_base.py       # BasePluginConfig: shared pydantic config + URL validation
+core/query_validator.py   # BaseQueryValidator: shared SQL/SoQL safety checks
+plugins/*, custom_plugins/*   # Provider-specific logic only
+```
+
+A plugin built on this layer never writes its own `execute_tool` dispatch,
+HTTP client bookkeeping, retry loop, or record formatting — it declares tools
+and implements provider calls. The built-in CKAN, Socrata, and ArcGIS plugins
+are all written this way.
+
+### What `BaseOpenDataPlugin` gives you
+
+| Facility | What it does |
+|---|---|
+| `tool_handlers()` | Declare `{tool_name: ToolHandler(handler, required_args=(...))}`; the base's `execute_tool` routes calls, rejects missing/empty required arguments, and translates exceptions into failed `ToolResult`s |
+| `_create_http_client(**kwargs)` | Creates an `httpx.AsyncClient` that the base tracks and closes for you in `shutdown()` |
+| `HTTP_RETRY` | Decorator adding exponential-backoff retries (3 attempts) for transient HTTP errors |
+| `_raise_http_error(exc, context)` | Translates `httpx.HTTPStatusError` into a user-readable `RuntimeError`, extracting portal error messages when present |
+| `format_records(records, max_display=10, header=None, skip_keys=...)` | Renders query results in the standard `Record N:` style, capped with `... and X more record(s)` |
+| `build_where_clause(filters)` | Builds a SQL `WHERE` body from a filter dict; escapes string values and **validates field names as plain identifiers** so SQL cannot be smuggled in through keys |
+
+### Minimal example
+
+```python
+from typing import Any
+
+from core.base_plugin import HTTP_RETRY, BaseOpenDataPlugin, ToolHandler
+from core.interfaces import PluginType, ToolDefinition, ToolResult
+
+
+class MyPortalPlugin(BaseOpenDataPlugin):
+    plugin_name = "my_portal"
+    plugin_type = PluginType.CUSTOM_API
+    plugin_version = "1.0.0"
+
+    async def initialize(self) -> bool:
+        # Tracked client: closed automatically by the base's shutdown()
+        self.client = self._create_http_client(
+            base_url=self.config["api_url"],
+            timeout=self.config.get("timeout", 30.0),
+        )
+        self._initialized = True
+        return True
+
+    def get_tools(self) -> list[ToolDefinition]:
+        return [
+            ToolDefinition(
+                name="search_datasets",
+                description="Search the portal catalog",
+                input_schema={
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            ),
+        ]
+
+    def tool_handlers(self) -> dict[str, ToolHandler]:
+        # No execute_tool() needed: the base dispatches and enforces
+        # required_args before your handler runs.
+        return {
+            "search_datasets": ToolHandler(
+                handler=self._tool_search, required_args=("query",)
+            ),
+        }
+
+    async def _tool_search(self, arguments: dict[str, Any]) -> ToolResult:
+        results = await self._search(arguments["query"])
+        return ToolResult(
+            content=[{"type": "text", "text": self.format_records(results)}],
+            success=True,
+        )
+
+    @HTTP_RETRY
+    async def _search(self, query: str) -> list[dict[str, Any]]:
+        response = await self.client.get("/search", params={"q": query})
+        response.raise_for_status()
+        return response.json()["results"]
+```
+
+### Shared config schema: `BasePluginConfig`
+
+Subclass it for `enabled`, `city_name`, and `timeout` for free, and reuse the
+shared URL validator instead of writing your own:
+
+```python
+from pydantic import Field, field_validator
+
+from core.config_base import BasePluginConfig
+
+
+class MyPortalConfig(BasePluginConfig):
+    api_url: str = Field(..., description="API base URL")
+
+    _validate_urls = field_validator("api_url")(BasePluginConfig.validate_url)
+```
+
+`validate_url` enforces http/https and a hostname, and strips trailing
+slashes. `extra="forbid"` is on by default, so config typos fail fast.
+
+### Shared query safety: `BaseQueryValidator`
+
+If your plugin accepts SQL-ish input, subclass `BaseQueryValidator` rather
+than writing a validator from scratch. It enforces a length cap, a
+`SELECT`-only prefix (`ALLOWED_PREFIXES`), forbidden keywords
+(`FORBIDDEN_KEYWORDS`), and multi-statement/dangerous-pattern checks.
+Override `extra_checks()` for provider-specific rules, or call
+`scan_forbidden_keywords()` alone for WHERE-clause-style fragments (see
+`plugins/arcgis/where_validator.py`, which also strips quoted string literals
+first so legitimate values like `status = 'SET'` pass).
 
 ## Required Methods
 
@@ -318,6 +439,9 @@ def __init__(self, config: Dict[str, Any]) -> None:
 ## Reference
 
 - [Plugin Template](../custom_plugins/template/plugin_template.py)
+- [Shared Base Plugin](../core/base_plugin.py) - `BaseOpenDataPlugin`, `ToolHandler`, `HTTP_RETRY`
+- [Shared Config Base](../core/config_base.py) - `BasePluginConfig`
+- [Shared Query Validator](../core/query_validator.py) - `BaseQueryValidator`
 - [CKAN Plugin](../plugins/ckan/plugin.py) - Example implementation
 - [Core Interfaces](../core/interfaces.py) - API reference
 

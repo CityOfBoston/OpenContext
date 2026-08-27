@@ -28,6 +28,14 @@ class ToolDefinition(BaseModel):
     input_schema: Dict[str, Any] = Field(
         ..., description="JSON Schema for tool input parameters"
     )
+    annotations: dict[str, Any] = Field(
+        default_factory=lambda: {"readOnlyHint": True, "openWorldHint": True},
+        description=(
+            "MCP tool annotations. Open data tools are read-only and pull from "
+            "an open, untrusted world; hosts use these hints to treat results "
+            "as untrusted content."
+        ),
+    )
 
 
 class ToolResult(BaseModel):

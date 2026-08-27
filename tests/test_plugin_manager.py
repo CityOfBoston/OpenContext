@@ -61,7 +61,7 @@ class TestPluginDiscovery:
         assert not any(name.startswith("_") for name in plugin_names)
 
     def test_discover_plugins_returns_list_of_tuples(self):
-        """Test that discovery returns list of (name, path) tuples."""
+        """Test that discovery returns list of (name, path, source_package) tuples."""
         config = {"plugins": {"ckan": {"enabled": True}}}
         manager = PluginManager(config)
         discovered = manager.discover_plugins()
@@ -69,9 +69,10 @@ class TestPluginDiscovery:
         assert isinstance(discovered, list)
         if len(discovered) > 0:
             assert isinstance(discovered[0], tuple)
-            assert len(discovered[0]) == 2
+            assert len(discovered[0]) == 3
             assert isinstance(discovered[0][0], str)  # Plugin name
             assert isinstance(discovered[0][1], Path)  # Plugin path
+            assert isinstance(discovered[0][2], str)  # Source package
 
 
 class TestPluginLoading:
@@ -286,8 +287,12 @@ class TestToolRegistration:
             # Tools should be registered with double underscore prefix
             assert "ckan__search_datasets" in manager.tools
             assert "ckan__get_dataset" in manager.tools
-            assert manager.tools["ckan__search_datasets"] == ("ckan", "search_datasets")
-            assert manager.tools["ckan__get_dataset"] == ("ckan", "get_dataset")
+            stored = manager.tools["ckan__search_datasets"]
+            assert stored[0] == "ckan"
+            assert stored[1].name == "search_datasets"
+            stored2 = manager.tools["ckan__get_dataset"]
+            assert stored2[0] == "ckan"
+            assert stored2[1].name == "get_dataset"
 
     @pytest.mark.asyncio
     async def test_get_all_tools_returns_prefixed_tools(self):
@@ -358,7 +363,10 @@ class TestToolExecution:
             mock_load.return_value = mock_plugin_class
 
             await manager.load_plugins()
-            manager.tools["ckan__test_tool"] = ("ckan", "test_tool")
+            manager.tools["ckan__test_tool"] = (
+                "ckan",
+                ToolDefinition(name="test_tool", description="test", input_schema={}),
+            )
 
             result = await manager.execute_tool("ckan__test_tool", {"arg": "value"})
 
@@ -432,7 +440,10 @@ class TestToolExecution:
             mock_load.return_value = mock_plugin_class
 
             await manager.load_plugins()
-            manager.tools["ckan__test_tool"] = ("ckan", "test_tool")
+            manager.tools["ckan__test_tool"] = (
+                "ckan",
+                ToolDefinition(name="test_tool", description="test", input_schema={}),
+            )
 
             result = await manager.execute_tool("ckan__test_tool", {})
 
@@ -612,7 +623,7 @@ class TestLoadPluginClass:
 
         plugin_path = Path(__file__).parent.parent / "plugins" / "ckan"
         if plugin_path.exists():
-            plugin_class = manager._load_plugin_class("ckan", plugin_path)
+            plugin_class = manager._load_plugin_class("ckan", plugin_path, "plugins")
             assert plugin_class is not None
             assert issubclass(plugin_class, MCPPlugin)
 
@@ -623,7 +634,7 @@ class TestLoadPluginClass:
 
         invalid_path = Path("/nonexistent/path")
         with pytest.raises((ImportError, ValueError)):
-            manager._load_plugin_class("invalid", invalid_path)
+            manager._load_plugin_class("invalid", invalid_path, "plugins")
 
     def test_load_plugin_class_raises_on_missing_plugin_class(self):
         """Test that missing plugin class raises ValueError."""
@@ -650,7 +661,7 @@ class TestLoadPluginClass:
             mock_import.return_value = mock_module
 
             with pytest.raises(ValueError) as exc_info:
-                manager._load_plugin_class("test_plugin", plugin_dir)
+                manager._load_plugin_class("test_plugin", plugin_dir, "plugins")
 
             assert "does not define a class" in str(exc_info.value).lower()
             mock_import.assert_called_once_with("plugins.test_plugin.plugin")

@@ -143,10 +143,10 @@ curl -X POST https://your-lambda-url \
 pip install aiohttp
 
 # Start local server
-python3 local_server.py
+python3 scripts/local_server.py
 
 # In another terminal, test with curl
-curl -X POST http://localhost:8000 \
+curl -X POST http://localhost:8000/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```

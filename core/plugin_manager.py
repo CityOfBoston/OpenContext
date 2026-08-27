@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from core.interfaces import MCPPlugin, ToolResult
+from core.interfaces import MCPPlugin, ToolDefinition, ToolResult
 from core.validators import ConfigurationError, get_enabled_plugin_config
 
 logger = logging.getLogger(__name__)
@@ -39,17 +39,18 @@ class PluginManager:
         self.config = config
         self.plugins: Dict[str, MCPPlugin] = {}
         self.tools: Dict[
-            str, Tuple[str, str]
-        ] = {}  # tool_name -> (plugin_name, tool_name)
+            str, Tuple[str, ToolDefinition]
+        ] = {}  # prefixed_name -> (plugin_name, ToolDefinition)
         self._initialized = False
 
-    def discover_plugins(self) -> List[Tuple[str, Path]]:
+    def discover_plugins(self) -> List[Tuple[str, Path, str]]:
         """Discover available plugins in plugins/ and custom_plugins/ directories.
 
         Returns:
-            List of tuples (plugin_name, plugin_directory_path)
+            List of tuples (plugin_name, plugin_directory_path, source_package)
+            where source_package is ``'plugins'`` or ``'custom_plugins'``.
         """
-        discovered = []
+        discovered: List[Tuple[str, Path, str]] = []
         base_dir = Path(__file__).parent.parent
 
         # Discover built-in plugins
@@ -59,7 +60,7 @@ class PluginManager:
                 if plugin_dir.is_dir() and not plugin_dir.name.startswith("_"):
                     plugin_file = plugin_dir / "plugin.py"
                     if plugin_file.exists():
-                        discovered.append((plugin_dir.name, plugin_dir))
+                        discovered.append((plugin_dir.name, plugin_dir, "plugins"))
 
         # Discover custom plugins
         custom_plugins_dir = base_dir / "custom_plugins"
@@ -68,19 +69,20 @@ class PluginManager:
                 if plugin_dir.is_dir() and not plugin_dir.name.startswith("_"):
                     plugin_file = plugin_dir / "plugin.py"
                     if plugin_file.exists():
-                        discovered.append((plugin_dir.name, plugin_dir))
+                        discovered.append((plugin_dir.name, plugin_dir, "custom_plugins"))
 
         logger.debug(
             f"Discovered {len(discovered)} plugins: {[p[0] for p in discovered]}"
         )
         return discovered
 
-    def _load_plugin_class(self, plugin_name: str, plugin_path: Path) -> type:
+    def _load_plugin_class(self, plugin_name: str, plugin_path: Path, source_package: str) -> type:
         """Load plugin class from a plugin module.
 
         Args:
             plugin_name: Name of the plugin
             plugin_path: Path to plugin directory
+            source_package: Top-level package name (``'plugins'`` or ``'custom_plugins'``)
 
         Returns:
             Plugin class that inherits from MCPPlugin
@@ -89,13 +91,7 @@ class PluginManager:
             ImportError: If plugin cannot be imported
             ValueError: If plugin class not found or invalid
         """
-        # Determine module path
-        if "plugins" in str(plugin_path):
-            module_path = f"plugins.{plugin_name}.plugin"
-        elif "custom_plugins" in str(plugin_path):
-            module_path = f"custom_plugins.{plugin_name}.plugin"
-        else:
-            raise ValueError(f"Invalid plugin path: {plugin_path}")
+        module_path = f"{source_package}.{plugin_name}.plugin"
 
         try:
             module = importlib.import_module(module_path)
@@ -152,12 +148,12 @@ class PluginManager:
                 f"custom_plugins/{plugin_name}/plugin.py exists."
             )
 
-        # Find plugin path
-        plugin_path = next(p[1] for p in discovered if p[0] == plugin_name)
+        # Find plugin path and source package
+        _, plugin_path, source_package = next(p for p in discovered if p[0] == plugin_name)
 
         # Load plugin class
         try:
-            plugin_class = self._load_plugin_class(plugin_name, plugin_path)
+            plugin_class = self._load_plugin_class(plugin_name, plugin_path, source_package)
         except (ImportError, ValueError) as e:
             logger.error(f"Failed to load plugin {plugin_name}: {e}")
             raise RuntimeError(f"Failed to load plugin {plugin_name}: {e}") from e
@@ -213,7 +209,7 @@ class PluginManager:
             if prefixed_name in self.tools:
                 logger.warning(f"Tool {prefixed_name} already registered, overwriting")
 
-            self.tools[prefixed_name] = (plugin_name, tool_def.name)
+            self.tools[prefixed_name] = (plugin_name, tool_def)
             logger.debug(f"Registered tool: {prefixed_name}")
 
         logger.info(f"Registered {len(tools)} tools from plugin {plugin_name}")
@@ -245,14 +241,14 @@ class PluginManager:
                 f"Tool '{tool_name}' not found. Available tools: {available}"
             )
 
-        plugin_name, actual_tool_name = self.tools[tool_name]
+        plugin_name, tool_def = self.tools[tool_name]
         plugin = self.plugins.get(plugin_name)
 
         if plugin is None:
             raise RuntimeError(f"Plugin {plugin_name} not loaded")
 
         try:
-            result = await plugin.execute_tool(actual_tool_name, arguments)
+            result = await plugin.execute_tool(tool_def.name, arguments)
             return result
         except Exception as e:
             logger.error(
@@ -272,22 +268,15 @@ class PluginManager:
         Returns:
             List of tool definitions with prefixed names
         """
-        tools = []
-
-        for plugin_name, plugin in self.plugins.items():
-            plugin_tools = plugin.get_tools()
-            for tool_def in plugin_tools:
-                # Use double underscore separator to match _register_tools
-                prefixed_name = f"{plugin_name}__{tool_def.name}"
-                tools.append(
-                    {
-                        "name": prefixed_name,
-                        "description": tool_def.description,
-                        "inputSchema": tool_def.input_schema,
-                    }
-                )
-
-        return tools
+        return [
+            {
+                "name": prefixed_name,
+                "description": tool_def.description,
+                "inputSchema": tool_def.input_schema,
+                "annotations": tool_def.annotations,
+            }
+            for prefixed_name, (_, tool_def) in self.tools.items()
+        ]
 
     async def health_check(self) -> Dict[str, bool]:
         """Check health of all loaded plugins.

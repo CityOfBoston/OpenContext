@@ -1,0 +1,1 @@
+"""Opendatasoft plugin for OpenContext."""

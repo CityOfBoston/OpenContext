@@ -58,15 +58,19 @@ jobs:
   test-suite:
     name: Test suite
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -75,7 +79,7 @@ jobs:
           cache-dependency-glob: "uv.lock"
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --all-extras --python ${{ matrix.python-version }}
 
       - name: Run Python tests with coverage
         run: |
@@ -94,3 +98,33 @@ jobs:
       - name: Run Go tests
         working-directory: ./client
         run: go test ./...
+
+  terraform-validate:
+    name: Terraform validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.x"
+
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive terraform/
+
+      - name: Validate terraform/aws
+        working-directory: ./terraform/aws
+        run: |
+          # Placeholder for the Lambda artifact referenced by filebase64sha256()
+          touch lambda-deployment.zip
+          terraform init -backend=false -input=false
+          terraform validate
+
+      - name: Validate terraform/bootstrap
+        working-directory: ./terraform/bootstrap
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate

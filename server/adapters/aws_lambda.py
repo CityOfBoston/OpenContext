@@ -30,6 +30,31 @@ logger = logging.getLogger(__name__)
 # Module-level handler instance for Lambda warm starts
 _handler: Optional[UniversalHTTPHandler] = None
 
+# Module-level event loop reused across Lambda invocations.
+# asyncio.run() creates and closes a fresh loop per call, which breaks httpx
+# clients bound to a previous loop on warm starts. Keeping a single loop alive
+# for the module's lifetime lets plugin HTTP clients persist between
+# invocations, so warm starts reuse the already-initialized plugin manager.
+_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+def _get_loop() -> asyncio.AbstractEventLoop:
+    """Get or create the module-level event loop.
+
+    The loop is created lazily on first use and reused for all subsequent
+    Lambda invocations so that async resources (e.g. httpx clients) created
+    on it remain valid across warm starts.
+
+    Returns:
+        The persistent event loop instance.
+    """
+    global _loop
+
+    if _loop is None or _loop.is_closed():
+        _loop = asyncio.new_event_loop()
+
+    return _loop
+
 
 def get_handler() -> UniversalHTTPHandler:
     """Get or create the universal HTTP handler instance.
@@ -140,30 +165,22 @@ def lambda_handler(
         else:
             headers = {}
 
-        # Get handler and process request
+        # Get handler and process request on the persistent event loop.
+        # Reusing one loop across invocations keeps plugin httpx clients bound
+        # to a live loop, so warm starts reuse the initialized handler without
+        # re-initializing the plugin (and the portal HTTP call) every request.
         handler = get_handler()
 
-        async def _run_with_cleanup():
-            try:
-                return await handler.handle_request(
-                    method=http_method,
-                    path=request_path,
-                    body=body,
-                    headers=headers,
-                    request_id=request_id,
-                )
-            finally:
-                # Close plugin HTTP clients before event loop closes.
-                # Fixes "Event loop is closed" on warm starts when tools use httpx.
-                from server import http_handler
-
-                if http_handler._plugin_manager is not None:
-                    await http_handler._plugin_manager.shutdown()
-                    http_handler._plugin_manager = None
-                    http_handler._mcp_server = None
-
-        # Run async handler
-        status_code, response_headers, response_body = asyncio.run(_run_with_cleanup())
+        loop = _get_loop()
+        status_code, response_headers, response_body = loop.run_until_complete(
+            handler.handle_request(
+                method=http_method,
+                path=request_path,
+                body=body,
+                headers=headers,
+                request_id=request_id,
+            )
+        )
 
         # Transform to Lambda response format
         lambda_response = {

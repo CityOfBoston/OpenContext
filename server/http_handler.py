@@ -24,31 +24,22 @@ from core.validators import (
     load_and_validate_config,
 )
 
-# Configure JSON logging globally (must be called before other loggers are created)
-# Try to get log level from config, but default to INFO if config not available yet
-try:
-    # Try loading config to get log level
-    if os.environ.get("OPENCONTEXT_CONFIG"):
-        config_json = os.environ.get("OPENCONTEXT_CONFIG")
-        config = json.loads(config_json)
-        logging_config = get_logging_config(config)
-        log_level = logging_config.get("level", "INFO")
-    else:
-        # Try loading from config.yaml (for local testing)
-        config = load_and_validate_config("config.yaml")
-        logging_config = get_logging_config(config)
-        log_level = logging_config.get("level", "INFO")
-except Exception:
-    # If config loading fails, use default
-    log_level = "INFO"
-
-configure_json_logging(level=log_level, pretty=False)  # Compact JSON for CloudWatch
+# Module-level default: configure JSON logging so imports are side-effect-free.
+# Log level may be refined once configuration is loaded at runtime.
+configure_json_logging(level="INFO", pretty=False)
 logger = logging.getLogger(__name__)
 
 # Global variables for container reuse (warm starts)
 _plugin_manager: Optional[PluginManager] = None
 _mcp_server: Optional[MCPServer] = None
 _config: Optional[Dict[str, Any]] = None
+
+
+def _configure_logging_from_config(config: Dict[str, Any]) -> None:
+    """Re-configure JSON logging using the loaded configuration dictionary."""
+    logging_config = get_logging_config(config)
+    log_level = logging_config.get("level", "INFO")
+    configure_json_logging(level=log_level, pretty=False)
 
 
 def _load_config() -> Dict[str, Any]:
@@ -99,6 +90,9 @@ async def _initialize_server() -> None:
 
     try:
         config = _load_config()
+
+        # Configure logging now that we have real configuration
+        _configure_logging_from_config(config)
 
         # Initialize Plugin Manager
         _plugin_manager = PluginManager(config)

@@ -13,7 +13,7 @@ variable "aws_region" {
 variable "config_file" {
   description = "Path to config.yaml file"
   type        = string
-  default = "../../config.yaml"
+  default     = "../../config.yaml"
 }
 
 variable "lambda_memory" {

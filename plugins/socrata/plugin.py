@@ -5,18 +5,15 @@ NYC, Seattle) using the Discovery API for catalog search and SODA3 for data acce
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 import httpx
-from tenacity import (
-    retry,
-    retry_if_not_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
 
-from core.interfaces import DataPlugin, PluginType, ToolDefinition, ToolResult
+from core.base_plugin import BaseOpenDataPlugin, HTTP_RETRY, ToolHandler
+from core.interfaces import PluginType, ToolDefinition, ToolResult
+from core.portal_content import join_cleaned
 from plugins.socrata.config_schema import SocrataPluginConfig
 from plugins.socrata.soql_validator import SoQLValidator
 
@@ -25,7 +22,7 @@ logger = logging.getLogger(__name__)
 DISCOVERY_API_BASE = "https://api.us.socrata.com"
 
 
-class SocrataPlugin(DataPlugin):
+class SocrataPlugin(BaseOpenDataPlugin):
     """Plugin for accessing Socrata-based open data portals.
 
     Uses two HTTP clients: Discovery API (catalog search) and SODA3 (data access).
@@ -35,16 +32,10 @@ class SocrataPlugin(DataPlugin):
     plugin_type = PluginType.OPEN_DATA
     plugin_version = "1.0.0"
 
-    def __init__(self, config: Dict[str, Any]) -> None:
-        """Initialize Socrata plugin with configuration.
-
-        Args:
-            config: Plugin configuration dictionary
-        """
-        super().__init__(config)
-        self.plugin_config = SocrataPluginConfig(**config)
-        self.discovery_client: Optional[httpx.AsyncClient] = None
-        self.soda_client: Optional[httpx.AsyncClient] = None
+    config_class = SocrataPluginConfig
+    # Socrata dataset IDs are "four-by-four" identifiers (e.g. abcd-1234).
+    id_pattern = re.compile(r"^[a-z0-9]{4}-[a-z0-9]{4}$")
+    provider_label = "open data portal (Socrata)"
 
     def _get_domain(self) -> str:
         """Extract hostname from base_url for Discovery API domains parameter."""
@@ -58,22 +49,15 @@ class SocrataPlugin(DataPlugin):
             True if initialization succeeded
         """
         try:
-            if (
-                not self.plugin_config.app_token
-                or not self.plugin_config.app_token.strip()
-            ):
-                logger.error("Socrata app token is required")
-                return False
-
             headers = {"X-App-Token": self.plugin_config.app_token}
 
-            self.discovery_client = httpx.AsyncClient(
+            self.discovery_client = self._create_http_client(
                 base_url=DISCOVERY_API_BASE,
                 headers=headers,
                 timeout=self.plugin_config.timeout,
             )
 
-            self.soda_client = httpx.AsyncClient(
+            self.soda_client = self._create_http_client(
                 base_url=self.plugin_config.portal_url,
                 headers=headers,
                 timeout=self.plugin_config.timeout,
@@ -94,22 +78,7 @@ class SocrataPlugin(DataPlugin):
             logger.error(f"Failed to initialize Socrata plugin: {e}", exc_info=True)
             return False
 
-    async def shutdown(self) -> None:
-        """Shutdown plugin and close HTTP clients."""
-        if self.discovery_client:
-            await self.discovery_client.aclose()
-            self.discovery_client = None
-        if self.soda_client:
-            await self.soda_client.aclose()
-            self.soda_client = None
-        self._initialized = False
-        logger.info("Socrata plugin shut down")
-
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_not_exception_type((RuntimeError, httpx.HTTPStatusError)),
-    )
+    @HTTP_RETRY
     async def _call_discovery_api(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Call Socrata Discovery API.
 
@@ -132,26 +101,11 @@ class SocrataPlugin(DataPlugin):
             response = await self.discovery_client.get("/api/catalog/v1", params=params)
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
-            status_code = e.response.status_code
-            try:
-                body = e.response.json()
-                msg = body.get("message", str(body))
-                raise RuntimeError(
-                    f"Discovery API error on {self.plugin_config.city_name} OpenData portal: {msg} (HTTP {status_code})"
-                ) from e
-            except (ValueError, TypeError):
-                pass
-            raise RuntimeError(
-                f"Discovery API error on {self.plugin_config.city_name} OpenData portal (HTTP {status_code})"
-            ) from e
+            self._raise_http_error(e, " Discovery API")
 
         return response.json()
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_not_exception_type((RuntimeError, httpx.HTTPStatusError)),
-    )
+    @HTTP_RETRY
     async def _call_soda_api(
         self, method: str, path: str, **kwargs: Any
     ) -> Dict[str, Any]:
@@ -171,8 +125,6 @@ class SocrataPlugin(DataPlugin):
         if not self.soda_client:
             raise RuntimeError("Plugin not initialized")
 
-        portal = f"{self.plugin_config.city_name} OpenData portal"
-
         try:
             if method.upper() == "GET":
                 response = await self.soda_client.get(path, **kwargs)
@@ -180,16 +132,7 @@ class SocrataPlugin(DataPlugin):
                 response = await self.soda_client.post(path, **kwargs)
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
-            status_code = e.response.status_code
-            try:
-                body = e.response.json()
-                msg = body.get("message", str(body))
-                raise RuntimeError(
-                    f"Error on {portal}: {msg} (HTTP {status_code})"
-                ) from e
-            except (ValueError, TypeError):
-                pass
-            raise RuntimeError(f"Error on {portal} (HTTP {status_code})") from e
+            self._raise_http_error(e)
 
         return response.json()
 
@@ -322,156 +265,112 @@ Use get_schema first for column names.""",
             ),
         ]
 
-    async def execute_tool(
-        self, tool_name: str, arguments: Dict[str, Any]
-    ) -> ToolResult:
-        """Execute a tool by name.
-
-        Args:
-            tool_name: Name of the tool
-            arguments: Tool arguments
+    def tool_handlers(self) -> Dict[str, ToolHandler]:
+        """Return the mapping of tool name to :class:`ToolHandler`.
 
         Returns:
-            ToolResult with content and success flag
+            Dict mapping tool name (without plugin prefix) to ToolHandler.
         """
-        try:
-            if tool_name == "search_datasets":
-                query = arguments.get("query", "")
-                limit = arguments.get("limit", 10)
-                datasets = await self.search_datasets(query, limit)
-                return ToolResult(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": self._format_search_results(datasets),
-                        }
-                    ],
-                    success=True,
-                )
+        return {
+            "search_datasets": ToolHandler(
+                handler=self._tool_search_datasets,
+                required_args=("query",),
+                guidance=(
+                    f"View all datasets at: {self.plugin_config.portal_url}\n"
+                    "Use the get_dataset tool with a dataset ID from the list "
+                    "to get more details."
+                ),
+            ),
+            "get_dataset": ToolHandler(
+                handler=self._tool_get_dataset,
+                required_args=("dataset_id",),
+                guidance=(
+                    "Use the get_schema tool with this dataset's ID to get "
+                    "column info, then query_dataset to query data."
+                ),
+            ),
+            "get_schema": ToolHandler(
+                handler=self._tool_get_schema, required_args=("dataset_id",)
+            ),
+            "query_dataset": ToolHandler(
+                handler=self._tool_query_dataset,
+                required_args=("dataset_id", "soql_query"),
+            ),
+            "list_categories": ToolHandler(handler=self._tool_list_categories),
+            "execute_sql": ToolHandler(
+                handler=self._tool_execute_sql, required_args=("dataset_id", "soql")
+            ),
+        }
 
-            elif tool_name == "get_dataset":
-                dataset_id = arguments.get("dataset_id")
-                if not dataset_id:
-                    return ToolResult(
-                        content=[],
-                        success=False,
-                        error_message="dataset_id is required",
-                    )
-                dataset = await self.get_dataset(dataset_id)
-                return ToolResult(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": self._format_dataset(dataset),
-                        }
-                    ],
-                    success=True,
-                )
+    async def _tool_search_datasets(self, arguments: Dict[str, Any]) -> ToolResult:
+        query = arguments.get("query", "")
+        limit = arguments.get("limit", 10)
+        result = await self._discovery_search({"q": query, "limit": limit})
+        datasets = result.get("results", []) or []
+        total = result.get("resultSetSize")
+        return ToolResult(
+            content=[
+                {
+                    "type": "text",
+                    "text": self._format_search_results(
+                        datasets, total=total if isinstance(total, int) else None
+                    ),
+                }
+            ],
+            success=True,
+        )
 
-            elif tool_name == "get_schema":
-                dataset_id = arguments.get("dataset_id")
-                if not dataset_id:
-                    return ToolResult(
-                        content=[],
-                        success=False,
-                        error_message="dataset_id is required",
-                    )
-                schema = await self.get_schema(dataset_id)
-                return ToolResult(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": self._format_schema(schema),
-                        }
-                    ],
-                    success=True,
-                )
+    async def _tool_get_dataset(self, arguments: Dict[str, Any]) -> ToolResult:
+        dataset = await self.get_dataset(arguments["dataset_id"])
+        return ToolResult(
+            content=[{"type": "text", "text": self._format_dataset(dataset)}],
+            success=True,
+        )
 
-            elif tool_name == "query_dataset":
-                dataset_id = arguments.get("dataset_id")
-                soql_query = arguments.get("soql_query")
-                if not dataset_id:
-                    return ToolResult(
-                        content=[],
-                        success=False,
-                        error_message="dataset_id is required",
-                    )
-                if not soql_query:
-                    return ToolResult(
-                        content=[],
-                        success=False,
-                        error_message="soql_query is required",
-                    )
-                data = await self._query_dataset(dataset_id, soql_query)
-                display_limit = self._parse_soql_limit(soql_query, default=100)
-                return ToolResult(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": self._format_query_results(
-                                data, limit=display_limit
-                            ),
-                        }
-                    ],
-                    success=True,
-                )
+    async def _tool_get_schema(self, arguments: Dict[str, Any]) -> ToolResult:
+        schema = await self.get_schema(arguments["dataset_id"])
+        return ToolResult(
+            content=[{"type": "text", "text": self._format_schema(schema)}],
+            success=True,
+        )
 
-            elif tool_name == "list_categories":
-                categories = await self._list_categories()
-                return ToolResult(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": self._format_categories(categories),
-                        }
-                    ],
-                    success=True,
-                )
+    async def _tool_query_dataset(self, arguments: Dict[str, Any]) -> ToolResult:
+        data = await self._query_dataset(
+            arguments["dataset_id"], arguments["soql_query"]
+        )
+        display_limit = self._parse_soql_limit(arguments["soql_query"], default=100)
+        return ToolResult(
+            content=[
+                {
+                    "type": "text",
+                    "text": self._format_query_results(data, limit=display_limit),
+                }
+            ],
+            success=True,
+        )
 
-            elif tool_name == "execute_sql":
-                dataset_id = arguments.get("dataset_id")
-                soql = arguments.get("soql")
-                if not dataset_id:
-                    return ToolResult(
-                        content=[],
-                        success=False,
-                        error_message="dataset_id is required",
-                    )
-                if not soql:
-                    return ToolResult(
-                        content=[],
-                        success=False,
-                        error_message="soql is required",
-                    )
-                result = await self.execute_sql(dataset_id, soql)
-                if result.get("error"):
-                    return ToolResult(
-                        content=[],
-                        success=False,
-                        error_message=result.get("message", "SoQL execution failed"),
-                    )
-                records = result.get("records", [])
-                fields = result.get("fields", [])
-                formatted_text = self._format_sql_results(records, fields)
-                return ToolResult(
-                    content=[{"type": "text", "text": formatted_text}],
-                    success=True,
-                )
+    async def _tool_list_categories(self, arguments: Dict[str, Any]) -> ToolResult:
+        categories = await self._list_categories()
+        return ToolResult(
+            content=[{"type": "text", "text": self._format_categories(categories)}],
+            success=True,
+        )
 
-            else:
-                return ToolResult(
-                    content=[],
-                    success=False,
-                    error_message=f"Unknown tool: {tool_name}",
-                )
-
-        except Exception as e:
-            logger.error(f"Error executing tool {tool_name}: {e}", exc_info=True)
+    async def _tool_execute_sql(self, arguments: Dict[str, Any]) -> ToolResult:
+        result = await self.execute_sql(arguments["dataset_id"], arguments["soql"])
+        if result.get("error"):
             return ToolResult(
                 content=[],
                 success=False,
-                error_message=str(e) if str(e) else "Tool execution failed",
+                error_message=result.get("message", "SoQL execution failed"),
             )
+        records = result.get("records", [])
+        fields = result.get("fields", [])
+        formatted_text = self._format_sql_results(records, fields)
+        return ToolResult(
+            content=[{"type": "text", "text": formatted_text}],
+            success=True,
+        )
 
     async def search_datasets(
         self, query: str, limit: int = 10
@@ -485,8 +384,16 @@ Use get_schema first for column names.""",
         Returns:
             List of dataset metadata dictionaries
         """
-        response = await self._call_discovery_api({"q": query, "limit": limit})
-        return response.get("results", [])
+        result = await self._discovery_search({"q": query, "limit": limit})
+        return result.get("results", []) or []
+
+    async def _discovery_search(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Call the Discovery API and return the full envelope.
+
+        The envelope carries ``resultSetSize`` (catalog-wide hit count) in
+        addition to ``results``.
+        """
+        return await self._call_discovery_api(params) or {}
 
     async def get_dataset(self, dataset_id: str) -> Dict[str, Any]:
         """Get detailed metadata for a specific dataset.
@@ -609,7 +516,15 @@ Use get_schema first for column names.""",
         category_counts: Dict[str, int] = {}
         offset = 0
         limit = 500
+        max_pages = 20
+        page_count = 0
         while True:
+            page_count += 1
+            if page_count > max_pages:
+                logger.warning(
+                    f"Category pagination exceeded {max_pages} pages ({max_pages * limit} results); stopping early."
+                )
+                break
             page = await self._call_discovery_api({"limit": limit, "offset": offset})
             results = page.get("results", [])
             if not results:
@@ -644,17 +559,7 @@ Use get_schema first for column names.""",
         Returns:
             List of data records
         """
-        where_parts = []
-        if filters:
-            for field, value in filters.items():
-                if isinstance(value, str):
-                    escaped = value.replace("'", "''")
-                    where_parts.append(f"{field} = '{escaped}'")
-                elif value is None:
-                    where_parts.append(f"{field} IS NULL")
-                else:
-                    where_parts.append(f"{field} = {value}")
-        where_clause = " AND ".join(where_parts)
+        where_clause = self.build_where_clause(filters) if filters else ""
         soql = f"SELECT * LIMIT {limit}"
         if where_clause:
             soql = f"SELECT * WHERE {where_clause} LIMIT {limit}"
@@ -673,80 +578,144 @@ Use get_schema first for column names.""",
             logger.error(f"Health check failed: {e}")
             return False
 
-    def _format_search_results(self, datasets: List[Dict[str, Any]]) -> str:
-        """Format search results for user display."""
+    def _format_search_results(
+        self, datasets: List[Dict[str, Any]], *, total: Optional[int] = None
+    ) -> str:
+        """Format search results for user display.
+
+        Args:
+            datasets: Discovery API hits.
+            total: Catalog-wide hit count (``resultSetSize``), if known.
+        """
         if not datasets:
             return f"No datasets found in {self.plugin_config.city_name}'s open data portal."
 
-        lines = [
-            f"Found {len(datasets)} dataset(s) in {self.plugin_config.city_name}'s open data portal:\n"
-        ]
+        lines = [self.format_search_header(total, len(datasets)), ""]
 
         for i, item in enumerate(datasets, 1):
             resource = item.get("resource", item)
-            name = resource.get("name", "Untitled")
-            dataset_id = resource.get("id", "unknown")
-            description = (
-                (resource.get("description") or "")[:100] + "..."
-                if resource.get("description")
-                else "No description"
+            classification = item.get("classification") or {}
+            name = self.portal_line(resource.get("name"), default="Untitled")
+            dataset_id = self.safe_id(resource.get("id"))
+            description = self.portal_line(
+                resource.get("description"), max_len=100, default="No description"
             )
-            category = resource.get("category", "")
-            permalink = resource.get("permalink", "")
-            if not permalink and dataset_id:
-                permalink = f"{self.plugin_config.portal_url}/d/{dataset_id}"
+            category = self.portal_line(
+                resource.get("category") or classification.get("domain_category")
+            )
+            modified = self.short_date(resource.get("updatedAt"))
+            columns = resource.get("columns_name")
+            downloads = resource.get("download_count")
+            attribution = self.portal_line(resource.get("attribution"))
 
             lines.append(f"{i}. {name}")
             lines.append(f"   ID: {dataset_id}")
+            facts = []
+            if modified:
+                facts.append(f"Modified: {modified}")
+            if isinstance(columns, list):
+                facts.append(f"Columns: {len(columns)}")
+            if isinstance(downloads, int):
+                facts.append(f"Downloads: {downloads}")
+            if attribution:
+                facts.append(f"Source: {attribution}")
+            if facts:
+                lines.append("   " + " | ".join(facts))
             lines.append(f"   Description: {description}")
             if category:
                 lines.append(f"   Category: {category}")
-            lines.append(f"   Portal: {permalink}")
+            if dataset_id != "unknown":
+                # Build the link from config + validated ID rather than echoing
+                # the portal-supplied permalink.
+                lines.append(
+                    f"   Portal: {self.plugin_config.portal_url}/d/{dataset_id}"
+                )
             lines.append("")
-
-        lines.append(
-            f"View all datasets at: {self.plugin_config.portal_url}\n"
-            f"Use get_dataset tool with dataset_id to get more details."
-        )
 
         return "\n".join(lines)
 
     def _format_dataset(self, dataset: Dict[str, Any]) -> str:
         """Format dataset metadata for user display."""
-        name = dataset.get("name", "Untitled")
-        dataset_id = dataset.get("id", dataset.get("viewId", "unknown"))
-        description = dataset.get("description", "No description")
-        row_count = dataset.get("rowCount", "N/A")
-        updated = dataset.get(
-            "rowsUpdatedAt", dataset.get("metadata_updated_at", "N/A")
+        name = self.portal_line(dataset.get("name"), default="Untitled")
+        dataset_id = self.safe_id(dataset.get("id", dataset.get("viewId")))
+        description = self.portal_block(
+            dataset.get("description"), default="No description"
         )
+        row_count = self.portal_line(dataset.get("rowCount"))
+        rows_updated = self.short_date(
+            dataset.get("rowsUpdatedAt", dataset.get("metadata_updated_at"))
+        )
+        created = self.short_date(dataset.get("createdAt"))
+        published = self.short_date(dataset.get("publicationDate"))
+        view_modified = self.short_date(dataset.get("viewLastModified"))
         tags = dataset.get("tags", [])
-        category = dataset.get("category", "")
-        license_info = dataset.get("license", {})
+        category = self.portal_line(dataset.get("category"))
+        license_info = dataset.get("license") or {}
+        if isinstance(license_info, dict):
+            license_name = self.portal_line(license_info.get("name"))
+            license_link = self.display_portal_url(license_info.get("termsLink"))
+        else:
+            license_name = self.portal_line(license_info)
+            license_link = ""
+        license_id = self.portal_line(dataset.get("licenseId"), max_len=100)
+        attribution = self.portal_line(dataset.get("attribution"))
+        attribution_link = self.display_portal_url(dataset.get("attributionLink"))
+        columns = dataset.get("columns")
+        downloads = dataset.get("downloadCount")
+        views = dataset.get("viewCount")
+        provenance = self.portal_line(dataset.get("provenance"), max_len=40)
 
-        lines = [
-            f"Dataset: {name}",
-            f"ID: {dataset_id}",
-            f"Description: {description}",
-            f"Row count: {row_count}",
-            f"Last updated: {updated}",
-            "",
-            f"Portal URL: {self.plugin_config.portal_url}/d/{dataset_id}",
-            "",
-        ]
-
-        if tags:
-            lines.append(f"Tags: {', '.join(tags) if isinstance(tags, list) else tags}")
+        lines = [f"Dataset: {name}", f"ID: {dataset_id}"]
+        if attribution:
+            if attribution_link.startswith("("):
+                # Untrusted host renders as "(external: host)" already.
+                lines.append(f"Source: {attribution} {attribution_link}")
+            elif attribution_link:
+                lines.append(f"Source: {attribution} ({attribution_link})")
+            else:
+                lines.append(f"Source: {attribution}")
+        if license_name or license_id:
+            license_line = f"License: {license_name or license_id}"
+            if license_id and license_name:
+                license_line += f" ({license_id})"
+            if license_link:
+                license_line += f" — {license_link}"
+            lines.append(license_line)
+        dates = []
+        if created:
+            dates.append(f"Created: {created}")
+        if published:
+            dates.append(f"Published: {published}")
+        if view_modified:
+            dates.append(f"Metadata modified: {view_modified}")
+        if rows_updated:
+            dates.append(f"Rows updated: {rows_updated}")
+        if dates:
+            lines.append(" | ".join(dates))
+        facts = []
+        if row_count:
+            facts.append(f"Rows: {row_count}")
+        if isinstance(columns, list):
+            facts.append(f"Columns: {len(columns)}")
+        if isinstance(downloads, int):
+            facts.append(f"Downloads: {downloads}")
+        if isinstance(views, int):
+            facts.append(f"Views: {views}")
+        if provenance:
+            facts.append(f"Provenance: {provenance}")
+        if facts:
+            lines.append(" | ".join(facts))
         if category:
             lines.append(f"Category: {category}")
-        if license_info:
-            lines.append(f"License: {license_info}")
-
-        lines.append("")
-        lines.append(
-            f"Use get_schema with dataset_id='{dataset_id}' to get column info, "
-            f"then query_dataset to query data."
-        )
+        if tags:
+            tag_text = (
+                join_cleaned(tags) if isinstance(tags, list) else self.portal_line(tags)
+            )
+            lines.append(f"Tags: {tag_text}")
+        lines.append(f"Description: {description}")
+        if dataset_id != "unknown":
+            lines.append("")
+            lines.append(f"Portal URL: {self.plugin_config.portal_url}/d/{dataset_id}")
 
         return "\n".join(lines)
 
@@ -757,10 +726,14 @@ Use get_schema first for column names.""",
 
         lines = ["Schema fields (use these for SoQL queries):"]
         for col in columns:
-            field_name = col.get("fieldName", col.get("id", col.get("name", "unknown")))
-            display_name = col.get("name", col.get("displayName", ""))
-            data_type = col.get("dataTypeName", col.get("type", "unknown"))
-            description = col.get("description", "")
+            field_name = self.portal_line(
+                col.get("fieldName", col.get("id", col.get("name"))), default="unknown"
+            )
+            display_name = self.portal_line(col.get("name", col.get("displayName")))
+            data_type = self.portal_line(
+                col.get("dataTypeName", col.get("type")), default="unknown"
+            )
+            description = self.portal_line(col.get("description"))
 
             lines.append(f"  • {field_name} ({data_type})")
             if display_name and display_name != field_name:
@@ -777,21 +750,11 @@ Use get_schema first for column names.""",
         if not records:
             return "No records found matching the query."
 
-        lines = [
-            f"Found {len(records)} record(s) (showing first {min(limit, len(records))}):\n"
-        ]
-
-        for i, record in enumerate(records[:limit], 1):
-            lines.append(f"Record {i}:")
-            for key, value in record.items():
-                if key != "_id":
-                    lines.append(f"  {key}: {value}")
-            lines.append("")
-
-        if len(records) > limit:
-            lines.append(f"... and {len(records) - limit} more record(s)")
-
-        return "\n".join(lines)
+        return self.format_records(
+            records,
+            max_display=limit,
+            header=f"Found {len(records)} record(s) (showing first {min(limit, len(records))}):",
+        )
 
     def _format_sql_results(
         self, records: List[Dict[str, Any]], fields: List[Dict[str, Any]]
@@ -808,23 +771,13 @@ Use get_schema first for column names.""",
         if not records:
             return "No records found matching the SoQL query."
 
-        lines = [f"SQL Query Results: {len(records)} record(s)\n"]
-
+        header_lines = [f"SQL Query Results: {len(records)} record(s)"]
         if fields:
             field_names = [field.get("id", "unknown") for field in fields]
-            lines.append(f"Fields: {', '.join(field_names)}\n")
+            header_lines.append(f"Fields: {join_cleaned(field_names)}")
 
-        for i, record in enumerate(records[:10], 1):
-            lines.append(f"Record {i}:")
-            for key, value in record.items():
-                if key != "_id":
-                    lines.append(f"  {key}: {value}")
-            lines.append("")
-
-        if len(records) > 10:
-            lines.append(f"... and {len(records) - 10} more record(s)")
-
-        return "\n".join(lines)
+        header = "\n".join(header_lines)
+        return self.format_records(records, max_display=10, header=header)
 
     def _format_categories(self, categories: List[Any]) -> str:
         """Format categories for user display."""
@@ -835,10 +788,10 @@ Use get_schema first for column names.""",
 
         for i, cat in enumerate(categories, 1):
             if isinstance(cat, dict):
-                name = cat.get("name", cat.get("label", str(cat)))
-                count = cat.get("count", cat.get("count", ""))
+                name = self.portal_line(cat.get("name", cat.get("label", str(cat))))
+                count = self.portal_line(cat.get("count", cat.get("value", "")))
                 lines.append(f"  {i}. {name}: {count} dataset(s)")
             else:
-                lines.append(f"  {i}. {cat}")
+                lines.append(f"  {i}. {self.portal_line(cat)}")
 
         return "\n".join(lines)

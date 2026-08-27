@@ -228,3 +228,8 @@ client/opencontext-client-*
 # Config yaml
 config.yaml
 examples/
+
+# Claude Code local files
+CLAUDE.md
+CLAUDE.local.md
+.claude/

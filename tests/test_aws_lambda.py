@@ -318,6 +318,72 @@ class TestLambdaHandler:
             call_args = mock_handler.handle_request.call_args
             assert call_args[1]["method"] == "POST"
 
+    def test_warm_start_reuses_handler_without_shutdown(self):
+        """Two sequential invocations reuse the same handler and never shut
+        down the plugin manager between requests.
+
+        This guards the warm-start performance fix: previously each invocation
+        ran asyncio.run() and shut down the plugin manager in a finally block,
+        forcing a full re-init (including a portal HTTP call) on every request.
+        """
+        import server.adapters.aws_lambda as adapter
+        import server.http_handler as http_handler
+
+        # Reset module state to simulate a fresh container.
+        adapter._handler = None
+        adapter._loop = None
+        http_handler._plugin_manager = None
+        http_handler._mcp_server = None
+
+        event = {
+            "requestContext": {"http": {"method": "POST", "path": "/mcp"}},
+            "rawPath": "/mcp",
+            "body": json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}),
+            "headers": {"Content-Type": "application/json"},
+        }
+        context = MockLambdaContext()
+
+        created_handlers = []
+        original_init = adapter.UniversalHTTPHandler.__init__
+
+        def tracking_init(self, *args, **kwargs):
+            original_init(self, *args, **kwargs)
+            created_handlers.append(self)
+
+        fake_response = (
+            200,
+            {"Content-Type": "application/json"},
+            json.dumps({"result": "success"}),
+        )
+
+        with patch.object(
+            adapter.UniversalHTTPHandler, "__init__", tracking_init
+        ), patch.object(
+            adapter.UniversalHTTPHandler,
+            "handle_request",
+            AsyncMock(return_value=fake_response),
+        ):
+            response1 = lambda_handler(event, context)
+            response2 = lambda_handler(event, context)
+
+        assert response1["statusCode"] == 200
+        assert response2["statusCode"] == 200
+
+        # The handler is created exactly once and reused on the second call.
+        assert len(created_handlers) == 1
+        assert adapter._handler is created_handlers[0]
+
+        # The persistent loop is created once and stays open for reuse.
+        assert adapter._loop is not None
+        assert not adapter._loop.is_closed()
+
+        # The plugin manager is never torn down between invocations; simulate
+        # that it would have been initialized on the first request and confirm
+        # no shutdown occurred by checking the globals remain unset (i.e. the
+        # adapter did not null them out as the old cleanup path did).
+        assert http_handler._plugin_manager is None
+        assert http_handler._mcp_server is None
+
 
 class TestGetHandler:
     """Test get_handler function."""

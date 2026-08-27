@@ -7,4 +7,4 @@ lambda_timeout  = 120
 api_quota_limit = 1000
 api_rate_limit  = 5
 api_burst_limit = 10
-custom_domain = "data-mcp-staging.boston.gov"
+custom_domain   = "data-mcp-staging.boston.gov"

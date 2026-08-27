@@ -51,6 +51,18 @@ plugins:
     city_name: "Your City"
     timeout: 120
     # token: "${ARCGIS_TOKEN}"  # Optional: Bearer token for private items
+    # trusted_service_hosts:      # Extra hosts trusted for Feature Service queries
+    #   - "gis.yourcity.gov"      # (needed when Hub references self-hosted services)
+
+  # Built-in: Opendatasoft (for Opendatasoft Explore v2.1 portals)
+  # Examples: data.longbeach.gov, public.opendatasoft.com
+  opendatasoft:
+    enabled: false # Set to true to use
+    base_url: "https://data.longbeach.gov" # Portal API base URL
+    portal_url: "https://data.longbeach.gov" # Public portal URL
+    city_name: "Long Beach" # City/organization name
+    timeout: 30 # HTTP timeout in seconds
+    # api_key: "${ODS_API_KEY}"  # Optional: only needed for private datasets
 
   # yamllint disable rule:comments-indentation
   # Custom: Add your own plugins here

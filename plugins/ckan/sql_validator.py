@@ -1,98 +1,62 @@
 """SQL validator for CKAN plugin.
 
 Provides security validation for SQL queries to prevent SQL injection
-and destructive operations.
+and destructive operations. Subclasses :class:`BaseQueryValidator` and
+adds CKAN-specific checks (single-statement enforcement via ``sqlparse``
+and double-quoted UUID resource-id validation) in :meth:`extra_checks`.
 """
 
 import re
-from typing import Tuple, Optional
+from typing import Optional
 
 import sqlparse
 
+from core.query_validator import BaseQueryValidator
 
-class SQLValidator:
+
+class SQLValidator(BaseQueryValidator):
     """Validates SQL queries for security before execution."""
 
-    MAX_SQL_LENGTH = 50000
-    FORBIDDEN_KEYWORDS = [
-        "INSERT",
-        "UPDATE",
-        "DELETE",
-        "DROP",
-        "CREATE",
-        "ALTER",
-        "GRANT",
-        "REVOKE",
-        "TRUNCATE",
-        "EXECUTE",
-        "EXEC",
-        "CALL",
-        "DECLARE",
-        "SET",
-    ]
+    # Kept for backwards compatibility with callers/tests that reference
+    # SQLValidator.MAX_SQL_LENGTH; the base class uses MAX_QUERY_LENGTH.
+    MAX_SQL_LENGTH: int = BaseQueryValidator.MAX_QUERY_LENGTH
 
-    @staticmethod
-    def validate_query(sql: str) -> Tuple[bool, Optional[str]]:
-        """Validate SQL security. Returns (is_valid, error_message).
+    ALLOWED_PREFIXES: tuple[str, ...] = ("SELECT", "WITH")
+
+    @classmethod
+    def extra_checks(cls, text: str) -> Optional[str]:
+        """Run CKAN-specific validation after the shared base checks pass.
+
+        Enforces single-statement queries and SELECT-only statement type via
+        ``sqlparse`` (CTEs starting with WITH are allowed because the prefix
+        check already accepted them), and validates that any double-quoted
+        36-character resource id looks like a UUID.
 
         Args:
-            sql: SQL query string to validate
+            text: The stripped query string that passed the base checks.
 
         Returns:
-            Tuple of (is_valid: bool, error_message: Optional[str])
-            If is_valid is True, error_message is None.
-            If is_valid is False, error_message contains the reason.
+            An error message string if validation fails, otherwise None.
         """
-        # 1. Basic checks
-        if not sql or not isinstance(sql, str):
-            return False, "SQL must be non-empty string"
-        sql = sql.strip()
-        if len(sql) > SQLValidator.MAX_SQL_LENGTH:
-            return (
-                False,
-                f"SQL too long (max {SQLValidator.MAX_SQL_LENGTH})",
-            )
-
-        # 2. Block forbidden keywords (check before SELECT check to get specific error messages)
-        for keyword in SQLValidator.FORBIDDEN_KEYWORDS:
-            if re.search(rf"\b{keyword}\b", sql, re.IGNORECASE):
-                return False, f"Forbidden keyword: {keyword}"
-
-        # 3. Must start with SELECT or WITH (for CTEs)
-        sql_upper = sql.upper().strip()
-        if not (sql_upper.startswith("SELECT") or sql_upper.startswith("WITH")):
-            return False, "Only SELECT queries allowed"
-
-        # 4. Block dangerous patterns
-        patterns = [
-            (r";.*(?:DROP|DELETE|INSERT)", "Multiple statements detected"),
-            (r"--.*(?:DROP|DELETE)", "Dangerous comment detected"),
-            (r"xp_cmdshell", "Command execution detected"),
-            (r"into\s+outfile", "File write detected"),
-            (r"pg_sleep", "Sleep function detected"),
-        ]
-        for pattern, msg in patterns:
-            if re.search(pattern, sql, re.IGNORECASE):
-                return False, msg
-
-        # 5. Validate with sqlparse
+        # Validate with sqlparse: single statement, SELECT type.
         try:
-            parsed = sqlparse.parse(sql)
+            parsed = sqlparse.parse(text)
             if len(parsed) != 1:
-                return False, "Multiple statements not allowed"
+                return "Multiple statements not allowed"
             statement_type = parsed[0].get_type()
-            # sqlparse returns "SELECT" for SELECT statements and CTEs (WITH ... SELECT)
-            # If type is None, it might be a CTE - we already validated it starts with WITH or SELECT above
+            # sqlparse returns "SELECT" for SELECT statements and CTEs
+            # (WITH ... SELECT). If type is None, it might be a CTE; the prefix
+            # check already accepted WITH/SELECT above.
             if statement_type is not None and statement_type != "SELECT":
-                return False, "Only SELECT statements allowed"
+                return "Only SELECT statements allowed"
         except Exception as e:
-            return False, f"SQL parsing error: {str(e)}"
+            return f"SQL parsing error: {str(e)}"
 
-        # 6. Validate resource IDs are UUIDs
-        resource_ids = re.findall(r'"([a-f0-9-]{36})"', sql, re.IGNORECASE)
+        # Validate resource IDs that are double-quoted 36-char strings.
+        resource_ids = re.findall(r'"([a-f0-9-]{36})"', text, re.IGNORECASE)
         uuid_pattern = r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
         for rid in resource_ids:
             if not re.match(uuid_pattern, rid, re.IGNORECASE):
-                return False, f"Invalid UUID format: {rid}"
+                return f"Invalid UUID format: {rid}"
 
-        return True, None
+        return None

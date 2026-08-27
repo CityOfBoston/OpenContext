@@ -46,6 +46,7 @@ See [Getting Started](docs/GETTING_STARTED.md) for full setup.
 | [Architecture](docs/ARCHITECTURE.md)       | System design and plugins                       |
 | [Deployment](docs/DEPLOYMENT.md)           | AWS, Terraform, monitoring                      |
 | [Testing](docs/TESTING.md)                 | Local testing (Terminal, Claude, MCP Inspector) |
+| [Security](docs/SECURITY.md)               | Threat model, prompt-injection guardrails       |
 
 
 ---

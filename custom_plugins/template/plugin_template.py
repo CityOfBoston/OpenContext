@@ -1,195 +1,249 @@
 """Plugin Template for OpenContext Custom Plugins
 
-This template shows how to create a custom plugin for OpenContext.
-Copy this file to custom_plugins/your_plugin_name/plugin.py and implement
-the required methods.
+This template shows how to create a custom open-data plugin for OpenContext
+using the shared :class:`BaseOpenDataPlugin` base class.
 
-Example:
-    cp custom_plugins/template/plugin_template.py custom_plugins/my_api/plugin.py
-    # Edit my_api/plugin.py, fill in TODOs
+Copy this file to ``custom_plugins/your_plugin_name/plugin.py`` and implement
+the TODO sections.  The template demonstrates:
+
+* Configuration validation with :class:`BasePluginConfig`
+* HTTP client lifecycle via ``_create_http_client``
+* Tool dispatch with :class:`ToolHandler` and ``required_args``
+* Data-access method stubs from the :class:`DataPlugin` interface
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from core.interfaces import MCPPlugin, PluginType, ToolDefinition, ToolResult
+from core.base_plugin import BaseOpenDataPlugin, ToolHandler
+from core.config_base import BasePluginConfig
+from core.interfaces import PluginType, ToolDefinition, ToolResult
+
+# Optional: add provider-specific fields to the base schema.
+#from pydantic import field_validator
 
 logger = logging.getLogger(__name__)
 
 
-class MyCustomPlugin(MCPPlugin):
-    """Template for a custom OpenContext plugin.
+# ──────────────────────────────────────────────────────────────────────────────
+# 1. Configuration schema
+# ──────────────────────────────────────────────────────────────────────────────
+# Subclass BasePluginConfig to add provider-specific fields (URLs, credentials,
+# etc.).  The base class already provides ``enabled``, ``city_name`` and
+# ``timeout`` with sensible defaults.
 
-    This plugin demonstrates the structure and required methods.
-    Replace 'MyCustomPlugin' with your plugin name.
+class MyPluginConfig(BasePluginConfig):
+    """Configuration schema for your custom open-data plugin.
+
+    Example ``config.yaml`` snippet::
+
+        plugins:
+          my_plugin:
+            enabled: true
+            city_name: "My City"
+            base_url: "https://api.example.com"
+            api_key: "${MY_API_KEY}"
     """
 
-    # REQUIRED: Set these class attributes
-    plugin_name = "my_custom_plugin"  # TODO: Change to your plugin name
-    plugin_type = PluginType.CUSTOM_API  # TODO: Choose appropriate type
+    base_url: str
+    api_key: Optional[str] = None
+
+    # Re-use the shared URL validator for any URL fields:
+    # _validate_urls = field_validator("base_url")(BasePluginConfig.validate_url)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 2. Plugin class
+# ──────────────────────────────────────────────────────────────────────────────
+
+class MyCustomPlugin(BaseOpenDataPlugin):
+    """Template for a custom open-data plugin.
+
+    Replace ``MyCustomPlugin`` with your class name, fill in the TODOs below,
+    and remove the methods you don't need.
+    """
+
+    # REQUIRED class attributes
+    plugin_name = "my_custom_plugin"  # TODO: change to your plugin name
+    plugin_type = PluginType.OPEN_DATA
     plugin_version = "1.0.0"
 
-    def __init__(self, config: Dict[str, Any]) -> None:
-        """Initialize plugin with configuration.
+    # REQUIRED: point to your config schema so ``__init__`` validates eagerly.
+    config_class = MyPluginConfig
 
-        Args:
-            config: Plugin-specific configuration from config.yaml
-        """
-        super().__init__(config)
-        # TODO: Extract and validate configuration values
-        # Example:
-        # self.api_url = config.get("api_url")
-        # self.api_key = config.get("api_key")
+    # BaseOpenDataPlugin.__init__(self, config) already:
+    #   - validates ``config`` against ``MyPluginConfig``
+    #   - stores the result in ``self.plugin_config``
+    #   - initialises ``self._clients`` for HTTP client tracking
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Lifecycle
+    # ──────────────────────────────────────────────────────────────────────────
 
     async def initialize(self) -> bool:
-        """Initialize the plugin and verify connectivity.
-
-        This method should:
-        - Create HTTP clients, database connections, etc.
-        - Test connectivity to your data source
-        - Validate configuration
-        - Set self._initialized = True on success
+        """Set up connections and verify the data source is reachable.
 
         Returns:
-            True if initialization succeeded, False otherwise
-
-        Raises:
-            Exception: If initialization fails critically
+            ``True`` on success (sets ``self._initialized``).
         """
         try:
-            # TODO: Initialize your plugin here
-            # Example:
-            # self.client = httpx.AsyncClient(base_url=self.api_url)
+            # Build headers from the validated config object
+            headers = {}
+            if self.plugin_config.api_key:
+                headers["Authorization"] = self.plugin_config.api_key
+
+            # Use the shared helper so the client is tracked for shutdown
+            self.client = self._create_http_client(
+                base_url=self.plugin_config.base_url,
+                headers=headers,
+                timeout=self.plugin_config.timeout,
+            )
+
+            # TODO: replace with a real health / discovery call to your API
             # response = await self.client.get("/health")
             # response.raise_for_status()
 
             self._initialized = True
-            logger.info(f"{self.plugin_name} plugin initialized successfully")
+            logger.info(
+                f"{self.plugin_name} plugin initialised for {self.plugin_config.city_name}"
+            )
             return True
 
         except Exception as e:
-            logger.error(
-                f"Failed to initialize {self.plugin_name} plugin: {e}", exc_info=True
-            )
+            logger.error(f"Failed to initialise {self.plugin_name}: {e}", exc_info=True)
             return False
 
-    async def shutdown(self) -> None:
-        """Clean up plugin resources.
+    # NOTE: ``shutdown()`` is provided by BaseOpenDataPlugin and will close
+    # every client created via ``_create_http_client``.  Override only if you
+    # need to release *additional* resources (database connections, etc.).
 
-        This method should:
-        - Close HTTP clients
-        - Close database connections
-        - Release any other resources
-        - Set self._initialized = False
-        """
-        # TODO: Clean up resources
-        # Example:
-        # if self.client:
-        #     await self.client.aclose()
-        #     self.client = None
-
-        self._initialized = False
-        logger.info(f"{self.plugin_name} plugin shut down")
+    # ──────────────────────────────────────────────────────────────────────────
+    # Tool definitions  (what the MCP server advertises to clients)
+    # ──────────────────────────────────────────────────────────────────────────
 
     def get_tools(self) -> List[ToolDefinition]:
-        """Get list of tools provided by this plugin.
+        """Return the list of tools exposed by this plugin.
 
-        Tool names should NOT include the plugin prefix (e.g., use "search"
-        not "my_custom_plugin.search"). The Plugin Manager will add the prefix.
-
-        Returns:
-            List of tool definitions
+        Tool names should **NOT** include the plugin prefix — the Plugin Manager
+        adds ``plugin_name__`` automatically.
         """
         return [
             ToolDefinition(
-                name="example_tool",  # TODO: Change tool name
-                description="Description of what this tool does",  # TODO: Update description
+                name="search_datasets",
+                description=f"Search datasets in {self.plugin_config.city_name}'s open data portal",
                 input_schema={
                     "type": "object",
                     "properties": {
-                        "param1": {
+                        "query": {
                             "type": "string",
-                            "description": "Description of param1",
+                            "description": "Search query string",
                         },
-                        # TODO: Add more parameters as needed
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of results (default: 20)",
+                            "default": 20,
+                        },
                     },
-                    "required": ["param1"],  # TODO: Specify required parameters
+                    "required": ["query"],
                 },
             ),
-            # TODO: Add more tools as needed
+            # TODO: add more ToolDefinitions as needed
         ]
 
-    async def execute_tool(
-        self, tool_name: str, arguments: Dict[str, Any]
-    ) -> ToolResult:
-        """Execute a tool by name.
+    # ──────────────────────────────────────────────────────────────────────────
+    # Tool handlers  (how each tool is executed)
+    # ──────────────────────────────────────────────────────────────────────────
 
-        Args:
-            tool_name: Name of the tool (without plugin prefix)
-            arguments: Tool input arguments
+    def tool_handlers(self) -> Dict[str, ToolHandler]:
+        """Map tool name (without prefix) to a :class:`ToolHandler`.
 
-        Returns:
-            ToolResult with content, success flag, and optional error message
+        ``required_args`` is a tuple of argument names that must be present **and**
+        truthy before the handler is invoked.  Missing args are automatically
+        rejected with a friendly error message — no need to write that
+        boiler-plate in every handler.
         """
-        try:
-            if tool_name == "example_tool":  # TODO: Match your tool name
-                # TODO: Implement tool logic
-                param1 = arguments.get("param1")
+        return {
+            "search_datasets": ToolHandler(
+                handler=self._tool_search_datasets,
+                # "query" must be provided and non-empty
+                required_args=("query",),
+            ),
+            # TODO: register additional handlers
+        }
 
-                # Example implementation:
-                # result = await self._call_api(param1)
-                # formatted_result = self._format_result(result)
+    async def _tool_search_datasets(self, arguments: Dict[str, Any]) -> ToolResult:
+        """Handler for the ``search_datasets`` tool."""
+        query = arguments["query"]
+        limit = arguments.get("limit", 20)
+        datasets = await self.search_datasets(query, limit)
+        return ToolResult(
+            content=[
+                {
+                    "type": "text",
+                    "text": self._format_search_results(datasets),
+                }
+            ],
+            success=True,
+        )
 
-                return ToolResult(
-                    content=[
-                        {
-                            "type": "text",
-                            "text": "Tool executed successfully",  # TODO: Return actual result
-                        }
-                    ],
-                    success=True,
-                )
-
-            else:
-                return ToolResult(
-                    content=[],
-                    success=False,
-                    error_message=f"Unknown tool: {tool_name}",
-                )
-
-        except Exception as e:
-            logger.error(f"Error executing tool {tool_name}: {e}", exc_info=True)
-            return ToolResult(
-                content=[],
-                success=False,
-                error_message=f"Tool execution failed: {str(e)}",
-            )
+    # ──────────────────────────────────────────────────────────────────────────
+    # Health check
+    # ──────────────────────────────────────────────────────────────────────────
 
     async def health_check(self) -> bool:
-        """Check if the plugin is healthy and can reach its data source.
-
-        Returns:
-            True if healthy, False otherwise
-        """
+        """Check if the plugin can reach its data source."""
         try:
-            # TODO: Implement health check
-            # Example:
+            # TODO: replace with a real probe
             # response = await self.client.get("/health")
             # return response.status_code == 200
-
             return self._initialized
-
         except Exception as e:
             logger.error(f"Health check failed: {e}")
             return False
 
-    # TODO: Add helper methods as needed
-    # Example:
-    # async def _call_api(self, param: str) -> Dict[str, Any]:
-    #     """Helper method to call your API."""
-    #     response = await self.client.get(f"/endpoint/{param}")
-    #     return response.json()
-    #
-    # def _format_result(self, data: Dict[str, Any]) -> str:
-    #     """Helper method to format results for display."""
-    #     return f"Result: {data}"
+    # ──────────────────────────────────────────────────────────────────────────
+    # DataPlugin abstract methods — implement these to fulfil the interface.
+    # BaseOpenDataPlugin provides helpers such as ``format_records`` and
+    # ``build_where_clause`` to reduce boiler-plate.
+    # ──────────────────────────────────────────────────────────────────────────
+
+    async def search_datasets(
+        self, query: str, limit: int = 20
+    ) -> List[Dict[str, Any]]:
+        """Search for datasets matching ``query``."""
+        # TODO: implement API call
+        raise NotImplementedError("TODO: implement search_datasets")
+
+    async def get_dataset(self, dataset_id: str) -> Dict[str, Any]:
+        """Get metadata for a specific dataset."""
+        # TODO: implement API call
+        raise NotImplementedError("TODO: implement get_dataset")
+
+    async def query_data(
+        self,
+        resource_id: str,
+        filters: Optional[Dict[str, Any]] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Query records from a resource."""
+        # TODO: implement API call
+        raise NotImplementedError("TODO: implement query_data")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Formatting helpers (private)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _format_search_results(self, datasets: List[Dict[str, Any]]) -> str:
+        """Format a list of datasets for display.
+
+        Uses ``BaseOpenDataPlugin.format_records`` for consistent styling.
+        """
+        if not datasets:
+            return f"No datasets found in {self.plugin_config.city_name}'s open data portal."
+
+        # TODO: replace with provider-specific formatting
+        return self.format_records(
+            datasets,
+            max_display=5,
+            header=f"Found {len(datasets)} dataset(s):",
+        )

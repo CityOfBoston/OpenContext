@@ -25,31 +25,35 @@ from core.validators import get_logging_config
 
 logger = logging.getLogger(__name__)
 
-# Load config (OPENCONTEXT_CONFIG env var for tests; default config.yaml)
-_config_path = os.environ.get("OPENCONTEXT_CONFIG", "config.yaml")
-with open(_config_path) as f:
-    config = yaml.safe_load(f)
-
-# Configure JSON logging - use pretty format for local development
-logging_config = get_logging_config(config)
-configure_json_logging(
-    level=logging_config.get("level", "INFO"),
-    pretty=True,  # Pretty-print JSON for better local readability
-)
-
 # Global server instance
 _plugin_manager = None
 _mcp_server = None
+_config = None
+
+
+def _load_local_config():
+    """Load configuration from OPENCONTEXT_CONFIG env var or default config.yaml."""
+    config_path = os.environ.get("OPENCONTEXT_CONFIG", "config.yaml")
+    with open(config_path) as f:
+        return yaml.safe_load(f)
 
 
 async def init_server():
     """Initialize server on startup."""
-    global _plugin_manager, _mcp_server
+    global _plugin_manager, _mcp_server, _config
+
+    # Load config and configure logging at init time (not import time)
+    _config = _load_local_config()
+    logging_config = get_logging_config(_config)
+    configure_json_logging(
+        level=logging_config.get("level", "INFO"),
+        pretty=True,  # Pretty-print JSON for better local readability
+    )
 
     print("🚀 Initializing OpenContext MCP Server locally...")
 
     # Initialize Plugin Manager
-    _plugin_manager = PluginManager(config)
+    _plugin_manager = PluginManager(_config)
     await _plugin_manager.load_plugins()
 
     # Initialize MCP Server
@@ -168,9 +172,9 @@ async def start_server():
 
     # Generate server name from config variables
     server_name = None
-    if "plugins" in config:
+    if "plugins" in _config:
         # Try to get city_name from enabled plugin
-        for plugin_name, plugin_config in config["plugins"].items():
+        for plugin_name, plugin_config in _config["plugins"].items():
             if plugin_config.get("enabled"):
                 if "city_name" in plugin_config:
                     city_name = plugin_config["city_name"].lower().replace(" ", "-")
@@ -183,13 +187,13 @@ async def start_server():
 
         # Fallback to lambda_name or server_name from config
         if not server_name:
-            if "aws" in config and "lambda_name" in config["aws"]:
-                lambda_name = config["aws"]["lambda_name"]
+            if "aws" in _config and "lambda_name" in _config["aws"]:
+                lambda_name = _config["aws"]["lambda_name"]
                 # Remove -mcp suffix if present
                 server_name = lambda_name.replace("-mcp", "")
-            elif "server_name" in config:
+            elif "server_name" in _config:
                 server_name = (
-                    config["server_name"].lower().replace(" ", "-").replace("'", "")
+                    _config["server_name"].lower().replace(" ", "-").replace("'", "")
                 )
 
     # Default fallback

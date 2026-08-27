@@ -13,6 +13,7 @@ from core.logging_utils import (
     format_jsonrpc_response_log,
 )
 from core.plugin_manager import PluginManager
+from core.portal_content import clean_error_message
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +129,8 @@ class MCPServer:
                 "error": {
                     "code": -32603,
                     "message": "Internal error",
-                    "data": str(e),
+                    # May embed a portal response body; cap and normalize it.
+                    "data": clean_error_message(str(e)),
                 },
             }
 

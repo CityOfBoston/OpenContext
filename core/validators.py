@@ -168,10 +168,6 @@ def get_enabled_plugin_config(config: Dict[str, Any]) -> Tuple[str, Dict[str, An
     """
     enabled_plugins, _ = validate_plugin_count(config)
 
-    if len(enabled_plugins) != 1:
-        # This should never happen if validate_plugin_count was called first
-        raise ConfigurationError("Internal error: Expected exactly one enabled plugin")
-
     plugin_name = enabled_plugins[0]
     plugin_config = config["plugins"][plugin_name]
 
