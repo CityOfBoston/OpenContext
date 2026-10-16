@@ -46,9 +46,9 @@ cli = [
 opencontext = "cli.main:app"
 
 [project.urls]
-Homepage = "https://github.com/thealphacubicle/OpenContext"
-Documentation = "https://github.com/thealphacubicle/OpenContext/blob/main/README.md"
-Repository = "https://github.com/thealphacubicle/OpenContext"
+Homepage = "https://github.com/sgarcese/OpenContext"
+Documentation = "https://github.com/sgarcese/OpenContext/blob/main/README.md"
+Repository = "https://github.com/sgarcese/OpenContext"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

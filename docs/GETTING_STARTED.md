@@ -22,7 +22,7 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/) if you do 
 Clone the repository and install the project plus CLI extras:
 
 ```bash
-git clone https://github.com/thealphacubicle/OpenContext.git
+git clone https://github.com/sgarcese/OpenContext.git
 cd OpenContext
 uv sync --extra cli
 ```
@@ -124,7 +124,7 @@ You can also test with Claude by asking it to search your data, or use [Testing]
 
 ### 1. Fork & Configure
 
-1. Fork the [OpenContext repository](https://github.com/thealphacubicle/OpenContext)
+1. Fork the [OpenContext repository](https://github.com/sgarcese/OpenContext)
 2. Clone your fork
 3. Check prerequisites:
 
@@ -244,4 +244,4 @@ See [CLI Guide](CLI.md) for full flag documentation.
 
 ## Support
 
-[GitHub Issues](https://github.com/thealphacubicle/OpenContext/issues)
+[GitHub Issues](https://github.com/sgarcese/OpenContext/issues)

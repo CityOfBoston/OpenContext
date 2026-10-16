@@ -9,7 +9,7 @@ from cli.utils import console, get_project_root
 
 app = typer.Typer()
 
-DEFAULT_UPSTREAM_URL = "https://github.com/thealphacubicle/OpenContext.git"
+DEFAULT_UPSTREAM_URL = "https://github.com/sgarcese/OpenContext.git"
 
 # Files that should never be automatically overwritten (city-specific)
 PROTECTED_FILES = {

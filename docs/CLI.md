@@ -7,7 +7,7 @@ The `opencontext` CLI manages the full lifecycle of an OpenContext MCP server â€
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/) first.
 
 ```bash
-git clone https://github.com/thealphacubicle/OpenContext.git
+git clone https://github.com/sgarcese/OpenContext.git
 cd OpenContext
 uv sync --extra cli
 ```
@@ -303,7 +303,7 @@ Merge updates from the upstream OpenContext template into your fork.
 
 ```bash
 opencontext upgrade
-opencontext upgrade --upstream-url https://github.com/thealphacubicle/OpenContext.git
+opencontext upgrade --upstream-url https://github.com/sgarcese/OpenContext.git
 ```
 
 | Flag | Default | Description |

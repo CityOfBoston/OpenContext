@@ -44,11 +44,11 @@ opencontext architecture              # print AWS infra diagram in terminal
 
 ```
 core/           # Framework kernel — interfaces, MCP server, plugin manager, validators
-plugins/        # Built-in plugins: ckan/, arcgis/, socrata/
+plugins/        # Built-in plugins: ckan/, arcgis/, socrata/, opendatasoft/
 custom_plugins/ # Drop user plugins here — auto-discovered at startup
 cli/            # Typer CLI (opencontext command)
-server/         # HTTP adapters: local aiohttp + AWS Lambda entry point
-server/adapters/ # local aiohttp dev server + AWS Lambda entry point
+server/         # Shared HTTP handler (http_handler.py) + cloud adapters
+server/adapters/ # AWS Lambda (aws_lambda.py) and GCP Cloud Functions (gcp_functions.py) entry points
 tests/          # pytest suite (80% coverage required)
 terraform/aws/  # Lambda + API Gateway + IAM IaC
 terraform/gcp/  # Cloud Functions gen2 + GCS + IAM IaC (see terraform/gcp/README.md)
@@ -57,10 +57,14 @@ docs/           # Architecture, deployment, plugin authoring guides
 
 Key files:
 - `core/interfaces.py` — `MCPPlugin` base class; implement this for any new plugin
+- `core/base_plugin.py` — `BaseOpenDataPlugin`, `ToolHandler`, `HTTP_RETRY`, record rendering; built-in plugins subclass it
+- `core/query_validator.py` — `BaseQueryValidator` shared by the SQL / SoQL / ODSQL / ArcGIS WHERE validators
+- `core/portal_content.py` — guardrails for untrusted portal text (framing, `safe_id`, `html_to_text`); see `docs/SECURITY.md`
 - `core/mcp_server.py` — JSON-RPC handler (initialize / tools/list / tools/call)
 - `core/plugin_manager.py` — discovery, loading, one-plugin enforcement
 - `core/validators.py` — config validation; enforces the one-plugin rule
 - `server/adapters/aws_lambda.py` — Lambda entry point
+- `server/adapters/gcp_functions.py` — GCP Cloud Functions gen2 entry point
 - `cli/commands/serve.py` — aiohttp dev server (started via `opencontext serve`)
 
 ## Plugin System

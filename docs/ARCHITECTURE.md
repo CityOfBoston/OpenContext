@@ -79,7 +79,7 @@ API Gateway (REST, Regional)
     → Lambda (server.adapters.aws_lambda.lambda_handler)
     → MCP Server (core/mcp_server.py)
     → Plugin Manager (core/plugin_manager.py)
-    → Plugin (CKAN / ArcGIS / Socrata / custom)
+    → Plugin (CKAN / ArcGIS / Socrata / Opendatasoft / custom)
     → External API
 
 Logs & traces:

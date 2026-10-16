@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import click
 import pytest
 
-_DEFAULT_URL = "https://github.com/thealphacubicle/OpenContext.git"
+_DEFAULT_URL = "https://github.com/sgarcese/OpenContext.git"
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +85,7 @@ class TestUpgradeAddsUpstreamRemote:
         mock_root.return_value = tmp_path
 
         mock_questionary.text.return_value.ask.return_value = (
-            "https://github.com/thealphacubicle/OpenContext.git"
+            "https://github.com/sgarcese/OpenContext.git"
         )
         mock_questionary.confirm.return_value.ask.return_value = (
             False  # cancel at confirm

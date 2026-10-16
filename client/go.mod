@@ -1,3 +1,3 @@
-module github.com/thealphacubicle/OpenContext/client
+module github.com/sgarcese/OpenContext/client
 
 go 1.21

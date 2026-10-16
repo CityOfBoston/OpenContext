@@ -47,6 +47,9 @@ Built-in plugins:
 - **CKAN** — For CKAN-based portals (e.g., data.gov, data.gov.uk)
 - **ArcGIS Hub** — For ArcGIS Hub portals (e.g., hub.arcgis.com)
 - **Socrata** — For Socrata portals (e.g., data.cityofchicago.org)
+- **Opendatasoft** — For Opendatasoft Explore v2.1 portals (e.g., data.longbeach.gov)
+
+See [Built-in Plugins](BUILT_IN_PLUGINS.md) for each plugin's tools and configuration.
 
 You can also create custom plugins in `custom_plugins/`.
 
@@ -195,13 +198,13 @@ Yes! Contributions are welcome. Please open an issue or pull request.
 
 ### Where is the code?
 
-[GitHub Repository](https://github.com/thealphacubicle/OpenContext)
+[GitHub Repository](https://github.com/sgarcese/OpenContext)
 
 ## Support
 
 ### Where can I get help?
 
-- [GitHub Issues](https://github.com/thealphacubicle/OpenContext/issues)
+- [GitHub Issues](https://github.com/sgarcese/OpenContext/issues)
 - [Documentation](.)
 - [FAQ](FAQ.md) (this page)
 

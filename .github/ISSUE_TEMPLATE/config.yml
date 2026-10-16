@@ -2,11 +2,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: Documentation
-    url: https://github.com/thealphacubicle/OpenContext/tree/main/docs
+    url: https://github.com/sgarcese/OpenContext/tree/main/docs
     about: Browse the full documentation before opening an issue.
   - name: Custom Plugin Guide
-    url: https://github.com/thealphacubicle/OpenContext/blob/main/docs/CUSTOM_PLUGINS.md
+    url: https://github.com/sgarcese/OpenContext/blob/main/docs/CUSTOM_PLUGINS.md
     about: Building a plugin for a portal not yet supported? Start here.
   - name: FAQ
-    url: https://github.com/thealphacubicle/OpenContext/blob/main/docs/FAQ.md
+    url: https://github.com/sgarcese/OpenContext/blob/main/docs/FAQ.md
     about: Common questions and answers.

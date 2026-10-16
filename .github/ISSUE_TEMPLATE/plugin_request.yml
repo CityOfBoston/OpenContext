@@ -12,7 +12,7 @@ body:
         > **Note:** OpenContext is designed for one plugin per deployment.
         > New built-in plugins are added to `plugins/` and must cover a
         > portal type used by multiple cities. For single-city or private data
-        > sources, a [custom plugin](https://github.com/thealphacubicle/OpenContext/blob/main/docs/CUSTOM_PLUGINS.md)
+        > sources, a [custom plugin](https://github.com/sgarcese/OpenContext/blob/main/docs/CUSTOM_PLUGINS.md)
         > is usually the right path.
 
   - type: input

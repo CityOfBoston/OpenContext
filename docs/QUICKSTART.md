@@ -11,7 +11,7 @@ Get your OpenContext MCP server running in 5 minutes.
 
 ## Step 1: Fork Repository
 
-1. Go to [OpenContext repository](https://github.com/thealphacubicle/OpenContext)
+1. Go to [OpenContext repository](https://github.com/sgarcese/OpenContext)
 2. Click "Fork"
 3. Clone your fork locally
 
@@ -149,5 +149,5 @@ Run `uv run opencontext authenticate` and follow the instructions for any failin
 ## Getting Help
 
 - [FAQ](FAQ.md)
-- [GitHub Issues](https://github.com/thealphacubicle/OpenContext/issues)
+- [GitHub Issues](https://github.com/sgarcese/OpenContext/issues)
 - [Documentation](.)
