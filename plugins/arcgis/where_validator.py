@@ -30,7 +30,19 @@ class WhereValidator(BaseQueryValidator):
     Service ``where`` parameter is a WHERE-clause fragment (not a full
     SELECT statement), so the prefix and dangerous-pattern checks do not
     apply. Only the forbidden-keyword scan is reused.
+
+    A WHERE/HAVING fragment never needs a subquery or a set operator on
+    services with standardized queries (the ArcGIS Online default), so
+    ``SELECT``, ``UNION``, ``INTERSECT`` and ``EXCEPT`` are refused as well.
     """
+
+    FORBIDDEN_KEYWORDS: list[str] = [
+        *BaseQueryValidator.FORBIDDEN_KEYWORDS,
+        "SELECT",
+        "UNION",
+        "INTERSECT",
+        "EXCEPT",
+    ]
 
     @classmethod
     def validate(cls, where: str) -> str:
@@ -55,6 +67,11 @@ class WhereValidator(BaseQueryValidator):
         # Scan only the structural SQL, not quoted string literals: values
         # like status = 'SET' or call_type = 'Initial Call' are legitimate
         # data, and keywords are only dangerous outside quotes.
+        # ArcGIS escapes a quote by doubling it. A backslash before a quote
+        # would end the literal early on a backend that honours C-style
+        # escapes, hiding SQL from the scan below, so refuse it outright.
+        if "\\'" in where:
+            raise ValueError("Backslash-escaped quote in WHERE clause; use '' instead")
         structural = _QUOTED_LITERAL.sub("''", where)
         forbidden = cls.scan_forbidden_keywords(structural)
         if forbidden:

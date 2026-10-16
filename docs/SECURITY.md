@@ -18,7 +18,8 @@ IDs that the connector forwards to the portal. Defenses:
   (`WhereValidator.validate_order_by`); `aggregate_data` statistic fields,
   output names and `group_by` fields must be plain identifiers that exist in
   the layer's schema, and `having` goes through the same `WhereValidator` as
-  `where`. `layer` must be an integer id the service lists. All of these are
+  `where`, which also refuses subqueries and set operators (`SELECT`, `UNION`,
+  `INTERSECT`, `EXCEPT` outside quoted values). `layer` must be an integer id the service lists. All of these are
   checked before any request is sent.
 - **`build_where_clause`** escapes values and rejects non-identifier field
   names.
